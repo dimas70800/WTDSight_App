@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>WTDSight</title>
+    <meta name="description"
+        content="WTDSight - это удобный онлайн редактор для создания пользовательских прицелов для War Thunder!" />
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="shortcut icon" href="images/logo.svg" type="image/svg+xml" />
+    <meta name="yandex-verification" content="4fadf15eb0ab4409" />
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-JPVCRMGP7V"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+
+        gtag('config', 'G-JPVCRMGP7V');
+    </script>
+    <script>(function (w, d, s, l, i) {
+            w[l] = w[l] || []; w[l].push({
+                'gtm.start':
+                    new Date().getTime(), event: 'gtm.js'
+            }); var f = d.getElementsByTagName(s)[0],
+                j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : ''; j.async = true; j.src =
+                    'https://www.googletagmanager.com/gtm.js?id=' + i + dl; f.parentNode.insertBefore(j, f);
+        })(window, document, 'script', 'dataLayer', 'GTM-KJFXSGPN');
+    </script>
+</head>
+
+<body>
+    <div id="updateBanner" class="update-banner">
+        <span id="updateBannerText">Доступно обновление</span>
+        <button id="updateBannerBtn" type="button">Обновить</button>
+    </div>
+
+    <div id="canvasContainer">
+        <canvas id="mainCanvas" width="3840" height="2160"></canvas>
+    </div>
+
+    <div id="dragDropOverlay" class="drag-drop-overlay">
+        <div class="drag-drop-content" id="dragDropOverlayText">
+            Перетащите сюда файл blk, json или любое изображение
+        </div>
+    </div>
+
+    <a id="saver"></a>
+
+    <div class="interface-wrapper">
+        <div class="side-panel-system" id="shell">
+            <aside class="icon-bar">
+                <div class="logo-container">
+                    <div class="logo">
+                        <img src="images/logo.svg" alt="Logo">
+                    </div>
+                </div>
+
+                <nav class="nav-static">
+                    <button class="tab-button" data-target="reference">
+                        <img src="images/reference.svg" alt="Ref">
+                    </button>
+                    <button class="tab-button" data-target="file">
+                        <img src="images/file.svg" alt="file">
+                    </button>
+                </nav>
+
+                <nav class="tool-menu">
+                    <button id="toolsLinesButton" class="tab-button active" data-target="lines">
+                        <img src="images/linesTool.svg" alt="Lines">
+                    </button>
+                    <button id="toolsCurveButton" class="tab-button" data-target="curve">
+                        <img src="images/curveTool.svg" alt="Curve">
+                    </button>
+                    <button id="toolsBrushButton" class="tab-button" data-target="brush">
+                        <img src="images/brushTool.svg" alt="Brush">
+                    </button>
+                    <button id="toolsQuadsButton" class="tab-button" data-target="quads">
+                        <img src="images/quadsTool.svg" alt="Quads">
+                    </button>
+                    <button id="toolsHatchButton" class="tab-button" data-target="hatch">
+                        <img src="images/hatchTool.svg" alt="Hatch">
+                    </button>
+                    <button id="toolsFillButton" class="tab-button" data-target="fill">
+                        <img src="images/fillTool.svg" alt="Fill">
+                    </button>
+                    <button id="toolsSelectButton" class="tab-button" data-target="select">
+                        <img src="images/selectTool.png" alt="Select">
+                    </button>
+                    <button id="toolsShapesButton" class="tab-button" data-target="shapes">
+                        <img src="images/shapesTool.svg" alt="Shapes">
+                    </button>
+                    <button id="toolsTextButton" class="tab-button" data-target="text">
+                        <img src="images/textTool.svg" alt="Text">
+                    </button>
+                    <button id="toolsVectorizeButton" class="tab-button" data-target="vectorize">
+                        <img src="images/vectorizeTool.webp" alt="Vectorize">
+                    </button>
+                </nav>
+
+                <div class="settings-section">
+                    <button class="tab-button no-stick"
+                        onclick="document.getElementById('settingsModalWindow').style.display='flex'">
+                        <img src="images/settings.svg" alt="" class="">
+                    </button>
+                </div>
+            </aside>
+
+            <div class="panel-container">
+                <div class="toggle-btn" onclick="togglePanel()" id="arrow">◀</div>
+                <div id="fullscreenBtn" class="toggle-btn" onclick="toggleFullScreen()">
+                    ⛶
+                </div>
+                <div id="undoBtn" class="toggle-btn" onclick="popEvent()" style="top: 140px; display: none;">
+                    ↩
+                </div>
+                <div id="redoBtn" class="toggle-btn" onclick="popRedo()" style="top: 200px; display: none;">
+                    ↪
+                </div>
+
+                <div id="snapBtn" class="toggle-btn" onclick="toggleMobileSnapping()"
+                    style="top: 250px; display: none; font-size: 20px;">
+                    🧲
+                </div>
+
+                <div class="toggle-btn" onclick="toggleSightPreview()" id="sightPreviewBtn" style="top: 75px;">
+                    <img src="images/preview-btn.svg" alt="preview button" style="height: 60%;">
+                </div>
+
+                <main class="main-content-panel">
+                    <div class="scroll-area" id="panel-content">
+
+                        <div id="panel-reference" class="panel-content">
+                            <h2 class="panel-title" id="refTitleText">Референс</h2>
+                            <div class="block-with-elem">
+                                <div>
+                                    <span id="refUrlTitle">URL картинки</span>:
+                                    <div style="display: flex; gap: 5px; margin-top: 5px; box-sizing: border-box;">
+                                        <input type="text" id="refUrl" value="" placeholder="Ссылка"
+                                            style="flex-grow: 1; max-width: 64%">
+                                        <button id="loadRefButton" onclick="setReference()">Загрузить</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <span id="refFileTitle">Файл картинки</span>:<br>
+                                    <label for="refFile" class="file-upload-btn" id="refFileLabel">Выбрать файл</label>
+                                    <input type="file" id="refFile" accept="image/*" style="display: none;">
+                                    <span id="refFileName"
+                                        style="display: block; margin-top: 4px; font-size: 12px; color: #777; word-break: break-all;"></span>
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span id="sizeRefTitle">Размер</span>:
+                                    <input type="number" id="refSize" oninput="setReferenceSize()" value="1" step="0.1"
+                                        style="width: 5em">
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span id="rotationTitle">Поворот</span>:
+                                    <input type="number" id="refRotation" step="1" value="0"
+                                        oninput="setReferenceRotation()" style="width: 5em">
+                                </div>
+                                <div>
+                                    <span id="shiftRefTitle">Смещение</span>:<br>
+                                    <div style="display: flex; gap: 5px; margin-top: 5px;">
+                                        <input type="number" id="refShiftX" oninput="setReferenceX()" value="0"
+                                            step="0.01" style="flex-grow: 1;" placeholder="X">
+                                        <input type="number" id="refShiftY" oninput="setReferenceY()" value="0"
+                                            step="0.01" style="flex-grow: 1;" placeholder="Y">
+                                    </div>
+                                </div>
+
+                                <label style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" id="refFreeMoveCheckbox" style="transform: scale(1.3);">
+                                    <span id="refFreeMoveLabel">Свободное перемещение</span>
+                                </label>
+
+                                <span id="refOpacityTitle">Непрозрачность картинки</span>
+                                <input id="refOpacityInput" type="range" value="0.5" min="0" max="1" step="0.01"
+                                    oninput="setReferenceOpacity()">
+                            </div>
+                            <div class="block-with-elem" style="align-items: center;">
+                                <span id="selectImageTitle">Выбор изображения:</span>
+                                <button id="nextRefButton"
+                                    onclick="currentReference = (currentReference + 1) % 3 ; setReferenceMenu();"
+                                    style="width: 100%;">1/3 ></button>
+                            </div>
+                        </div>
+
+                        <div id="panel-file" class="panel-content">
+                            <h2 class="panel-title" id="fileTitleText">Файл</h2>
+                            <div class="block-with-elem">
+                                <div>
+                                    <span id="saveFileNameTitle">Название файла</span>:<br>
+                                    <input type="text" id="saveFileName" value="sight" placeholder="Название"
+                                        style="width: 100%; margin-top: 5px;">
+                                </div>
+                                <button id="loadButton"
+                                    onclick="document.getElementById('loadButtonInput').click()">Загрузить из
+                                    файла</button>
+                                <input type="file" id="loadButtonInput" style="display: none" accept="application/json">
+
+                                <button id="loadBlkButton"
+                                    onclick="document.getElementById('loadBlkInput').click()">Загрузить из BLK</button>
+                                <input type="file" id="loadBlkInput" style="display: none" accept=".blk,.txt">
+
+                                <label style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" id="replaceObjectsOnLoad" checked
+                                        style="transform: scale(1.3);">
+                                    <span id="replaceObjectsLabel">Заменять объекты</span>
+                                </label>
+
+                                <button id="saveButton" onclick="save()">Сохранить в файл</button>
+
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <button id="autosaveManually" onclick="forcedSave()"
+                                        style="flex-grow: 1;">Принудительно автосохранить</button>
+                                    <img id="saveIcon" src="images/save.png"
+                                        style="height: 1.5em; opacity: 0%; transition: opacity 0.2s;">
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <button id="exportButtonBlk">Экспортировать прицел как .blk</button>
+                                <button id="exportButton" onclick="exportToClipboard()">Экспортировать прицел как
+                                    .txt</button>
+                                <div>
+                                    <button id="shareSightBtn"
+                                        style="background: #3395f1; color: white; width: 100%;">Поделиться
+                                        прицелом</button>
+
+                                    <div id="shareLinkContainer"
+                                        style="display: none; margin-top: 10px; flex-direction: column; gap: 5px;">
+                                        <span style="font-size: 12px;" id="shareLinkTitle">Ссылка на
+                                            прицел:</span>
+                                        <div style="display: flex; gap: 5px;">
+                                            <input type="text" id="shareLinkInput" readonly style="flex-grow: 1;"
+                                                onclick="this.select()">
+                                            <button id="copyShareLinkBtn" style="width: auto; padding: 6px 12px;"
+                                                title="Копировать">📋</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <button id="playAnimationBtn" onclick="toggleDrawingAnimation()">Анимация
+                                    рисования</button>
+                                <div style="display: flex; align-items: center; justify-content: center;">
+                                    <label id="speedAnimationLabel" style="flex: 1">
+                                        Скорость
+                                    </label>
+                                    <input style="flex: 1;" type="number" min="0.1" max="10" step="0.1" value="1"
+                                        oninput="animationSpeedMultiplier = parseFloat(this.value) || 1">
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <div>
+                                    <span id="archiveNameTitle">Название архива</span>:<br>
+                                    <input type="text" id="archiveFileName" value="Sight" placeholder="Название архива"
+                                        style="width: 100%; margin-top: 5px; box-sizing: border-box;">
+                                </div>
+
+                                <div style="display: flex; gap: 8px; margin-top: 8px; flex-direction: column;">
+                                    <button id="addCurrentSightBtn" onclick="addCurrentSightToArchive()"
+                                        style="flex: 1; padding: 5px 0;">Добавить текущий прицел</button>
+                                    <button id="addFilesToArchiveBtn"
+                                        onclick="document.getElementById('archiveFileInput').click()"
+                                        style="flex: 1; padding: 5px 0;">Добавить файл</button>
+                                </div>
+                                <input type="file" id="archiveFileInput" style="display: none" accept=".blk,.json"
+                                    multiple>
+
+                                <div id="archiveFilesList"
+                                    style="height: 140px; overflow-y: auto; overflow-x: hidden; background: var(--input-bg); border: 1px solid var(--border-col); border-radius: 4px; padding: 4px; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+                                </div>
+
+                                <button id="createArchiveBtn" onclick="createZipArchive()"
+                                    style="width: 100%; margin-top: 8px; border: none; padding: 6px 0; font-weight: bold;">Создать
+                                    архив</button>
+                            </div>
+                        </div>
+
+                        <div id="panel-lines" class="panel-content">
+                            <h2 class="panel-title" id="linesTitleText">Линии</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="linesDescription">Зажмите и
+                                тяните чтобы создать линию
+                            </p>
+                            <span id="toolTitle" style="display:none;"></span>
+                        </div>
+
+                        <div id="panel-curve" class="panel-content">
+                            <h2 class="panel-title" id="curveTitleText">Кривая</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="curveDescription">Зажмите и
+                                рисуйте произвольную линию. При
+                                отпускании она конвертируется в обычные линии</p>
+
+                            <div class="block-with-elem" style="margin-top: 10px;">
+
+                                <div style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+                                    <span id="curveSimplificationLabel">Упрощение линий</span>
+                                    <input type="range" id="curveSimplifyInput" min="1" max="50" value="10">
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 5px;">
+                                    <span id="curveSmoothingLabel">Сглаживание</span>
+                                    <input type="range" id="curveSmoothInput" min="1" max="15" value="5">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="panel-quads" class="panel-content">
+                            <h2 class="panel-title" id="quadsTitleText">Четырёхугольники</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="quadsDescription">Кликайте по
+                                холсту для создания
+                                четырёхугольника (4 точки)</p>
+                            <span id="toolTitle" style="display:none;"></span>
+                        </div>
+
+                        <div id="panel-hatch" class="panel-content">
+                            <h2 class="panel-title" id="hatchTitleText">Штриховка</h2>
+                            <p style="font-size: 13px; color: #aaa;" id="hatchDescription">Кликайте по
+                                холсту, чтобы создать
+                                контур (мин. 3 точки)</p>
+
+                            <div class="block-with-elem">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                        <input type="checkbox" id="hatchGridCheckbox" style="transform: scale(1.2);">
+                                        <span id="hatchGridLabel">Сетка</span>
+                                    </label>
+                                </div>
+                                <div id="hatchGridAngleContainer"
+                                    style="display: none; justify-content: space-between; align-items: center; margin-top: 5px;">
+                                    <label id="hatchGridAngleTitle">Угол сетки:</label>
+                                    <input type="number" id="hatchGridAngleInput" step="1" value="90" min="0" max="180"
+                                        style="width: 100px;">
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <label id="hatchAngle">Угол:</label>
+                                    <input type="number" id="hatchAngleInput" step="1" value="45" style="width: 100px;">
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <label id="hatchDensity">Плотность:</label>
+                                    <div style="display: flex; gap: 4px; align-items: center;">
+                                        <button id="hatchEyedropperBtn"
+                                            style="width: 30px; height: 30px; padding: 4px;">
+                                            <img src="images/eyedropperIcon.svg" style="height: 100%; width: 100%;">
+                                        </button>
+                                        <input type="number" id="hatchDensityInput" min="0.001" max="0.5" step="0.001"
+                                            value="0.03" style="width: 100px;">
+                                    </div>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <label id="hatchPhase">Сдвиг:</label>
+                                    <input type="number" id="hatchPhaseInput" step="0.01" value="0"
+                                        style="width: 100px;">
+                                </div>
+                                <div style="display: flex; justify-content: right; padding: 0 5%;">
+                                    <span id="middleLineForHatch" style="font-size: 13px; color: #aaa;">50% = 0.075
+                                        ↑</span>
+                                </div>
+                                <div
+                                    style="font-size: 12px; color: #888; text-align: center; margin-top: 10px; border-top: 1px solid var(--border-col); padding-top: 8px;">
+                                    <span id="hatchPointsCount">Точек</span>: <span id="hatchPointsNum">0</span>
+                                </div>
+                                <div style="display: flex; gap: 8px; margin-top: 5px;">
+                                    <button id="hatchCreateBtn"
+                                        style="background: #228025; color: white; flex-grow: 1;">Создать</button>
+                                    <button id="hatchCancelBtn"
+                                        style="background: #eb3b3b; color: white; flex-grow: 1;">Отмена</button>
+                                </div>
+                            </div>
+                            <button id="hatchRestoreBtn">Предыдущая зона</button>
+
+                            <div class="block-with-elem" style="margin-top: 5px;">
+                                <span style="font-size: 13px; text-align: center;" id="areaSelectHatchLabel">Выделение
+                                    области</span>
+                                <div
+                                    style="display: flex; justify-content:space-evenly; flex-direction: row; gap: 5px;">
+                                    <button id="hatchInputManualBtn" onclick="setHatchInputMode('manual')"
+                                        style="width: 60px; height: 60px; background: var(--input-bg); border-color: transparent;">
+                                        <img src="images/manualSelect.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                    <button id="hatchInputWandBtn" onclick="setHatchInputMode('wand')"
+                                        style="width: 60px; height: 60px; background: transparent; border: 1px solid var(--border-col);">
+                                        <img src="images/magicSelect.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="block-with-elem">
+                                <div style="display: flex; justify-content:space-evenly; flex-direction: row;">
+                                    <button id="hatchModeLinesBtn" onclick="setHatchMode('lines')"
+                                        style="width: 60px; height: 60px; background: var(--input-bg); border-color: transparent;">
+                                        <img src="images/hatchLines.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                    <button id="hatchModeQuadsBtn" onclick="setHatchMode('quads')"
+                                        style="width: 60px; height: 60px; background: transparent; border: 1px solid var(--border-col);">
+                                        <img src="images/hatchQuads.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                </div>
+                                <div id="hatchThicknessContainer"
+                                    style="display: none; justify-content: space-between; align-items: center;">
+                                    <label id="hatchThicknessLabel">Толщина</label>
+                                    <input type="number" id="hatchThicknessInput" min="0.001" max="0.5" step="0.001"
+                                        value="0.005" style="width: 100px;">
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <span id="hatchAreaModeLabel" style="font-size: 13px; text-align: center;">Режим
+                                    области</span>
+                                <div
+                                    style="display: flex; justify-content:space-evenly; flex-direction: row; gap: 5px;">
+                                    <button id="hatchRegionSingleBtn" onclick="setHatchRegionMode('single')"
+                                        style="width: 60px; height: 60px; flex: 1;"><img src="images/standardHatch.svg"
+                                            style="height: 100%; width: 100%;"></button>
+                                    <button id="hatchRegionMultiBtn" onclick="setHatchRegionMode('multi')"
+                                        style="width: 60px; height: 60px; flex: 1;"><img src="images/multiHatch.svg"
+                                            style="height: 100%; width: 100%;"></button>
+                                </div>
+
+                                <div id="hatchMultiControls"
+                                    style="display: none; align-items: center; justify-content: center; gap: 5px; margin-top: 8px; border-top: 1px solid var(--border-col); padding-top: 8px;">
+                                    <button onclick="changeHatchRegion(-1)"
+                                        style="width: 40px; height: 40px;">&lt;</button>
+                                    <input type="number" id="hatchRegionInput" value="1" min="1" step="1"
+                                        style="width: 60px; height: 40px; text-align: center;"
+                                        onchange="setHatchRegionFromInput()">
+                                    <button onclick="changeHatchRegion(1)"
+                                        style="width: 40px; height: 40px;">&gt;</button>
+                                    <button onclick="addHatchRegion()"
+                                        style="width: 40px; height: 40px; align-items: center; justify-content: center;">+</button>
+                                    <button onclick="deleteHatchRegion()" style="width: 40px; height: 40px;"><img
+                                            src="images/trashIcon.svg" alt="Удалить зону"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="panel-vectorize" class="panel-content">
+                            <div id="vectorizePanel" style="display: flex; flex-direction: column; gap: 6px;">
+                                <h2 class="panel-title" id="vectorizeTitle" style="margin-bottom: 0px;">Векторизация
+                                </h2>
+                                <div id="vectorizeBeta" style="color: #777777; font-size: 12px; margin-bottom: 20px;">
+                                    (Бета-Тест)</div>
+
+                                <div class="block-with-elem">
+                                    <span style="font-size: 13px; text-align: center;" id="vectorizeModeLabel">Режим
+                                        генерации</span>
+                                    <div
+                                        style="display: flex; justify-content:space-evenly; flex-direction: row; gap: 5px;">
+                                        <button id="vectorizeModeLinesBtn" onclick="setVectorizeMode('lines')"
+                                            style="width: 60px; height: 60px; background: var(--input-bg); border-color: transparent; font-size: 22px; line-height: 1;"><img
+                                                src="images/linesTool.svg" style="height: 100%; width: 100%;"></button>
+                                        <button id="vectorizeModeQuadsBtn" onclick="setVectorizeMode('quads')"
+                                            style="width: 60px; height: 60px; background: transparent; border: 1px solid var(--border-col); font-size: 22px; line-height: 1;"><img
+                                                src="images/quadsTool.svg" style="height: 100%; width: 100%;"></button>
+                                    </div>
+                                </div>
+
+                                <div id="vectorizeLinesSettings" class="vectorize-section">
+                                    <div
+                                        style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px;">
+                                        <span id="vectorizeTargetLinesLabel">Целевое количество линий:</span>
+                                        <span><span id="vectorizeTargetVal">2000</span> / <span
+                                                id="vectorizeMaxLines">8000</span></span>
+                                    </div>
+                                    <input type="range" id="vectorizeTargetLines" min="50" max="8000" step="10"
+                                        value="2000">
+
+                                    <div
+                                        style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 5px; font-size: 12px;">
+                                        <span id="vectorizeSensitivityLabel">Чувствительность:</span>
+                                        <select id="vectorizeSensitivity">
+                                            <option id="vectorizeVerySoft" value="very_soft">Очень мягкая</option>
+                                            <option id="vectorizeSoft" value="soft">Мягкая</option>
+                                            <option id="vectorizeSemiSoft" value="semi_soft">Полумягкая</option>
+                                            <option id="vectorizeBalanced" value="balanced" selected>Сбалансированная
+                                            </option>
+                                            <option id="vectorizeSemiSharp" value="semi_sharp">Полурезкая</option>
+                                            <option id="vectorizeSharp" value="sharp">Резкая</option>
+                                            <option id="vectorizeVerySharp" value="very_sharp">Очень резкая</option>
+                                        </select>
+                                    </div>
+
+                                    <div
+                                        style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 5px; font-size: 12px;">
+                                        <span id="vectorizeDenoiseLabel">Шумоподавление:</span>
+                                        <select id="vectorizeDenoise">
+                                            <option id="vectorizeDenoiseOff" value="0">Выкл</option>
+                                            <option id="vectorizeDenoiseLow" value="1" selected>Слабое</option>
+                                            <option id="vectorizeDenoiseHigh" value="2">Сильное</option>
+                                        </select>
+                                    </div>
+
+                                    <div style="margin: 8px 0; font-size: 12px;">
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span id="vectorizeSharpnessLabel">Чёткость границ:</span>
+                                            <span><span id="vectorizeSharpnessVal">1.0</span></span>
+                                        </div>
+                                        <input type="range" id="vectorizeSharpness" min="0.3" max="2.5" step="0.05"
+                                            value="1.0">
+                                    </div>
+
+                                    <div style="margin: 8px 0 6px 0; font-size: 12px;">
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span id="vectorizeSimplifyLabel">Упрощение линий:</span>
+                                            <span><span id="vectorizeSimplifyVal">1.0</span></span>
+                                        </div>
+                                        <input type="range" id="vectorizeSimplify" min="0.3" max="2.0" step="0.05"
+                                            value="1.0">
+                                    </div>
+                                </div>
+
+                                <div id="vectorizeQuadsSettings" class="vectorize-section" style="display: none;">
+                                    <div
+                                        style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px;">
+                                        <span id="vectorizeQuadsMaxLabel">Лимит четырёхугольников:</span>
+                                        <span><span id="vectorizeQuadsTargetVal">8000</span> / <span
+                                                id="vectorizeQuadsMaxLines">8000</span></span>
+                                    </div>
+                                    <input type="range" id="vectorizeQuadsTarget" min="50" max="8000" step="10"
+                                        value="8000">
+
+                                    <div style="margin: 8px 0; font-size: 12px;">
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span id="vectorizeQuadsBlurLabel">Толщина линий:</span>
+                                            <span><span id="vectorizeQuadsBlurVal">3</span></span>
+                                        </div>
+                                        <input type="range" id="vectorizeQuadsBlur" min="1" max="10" step="1" value="3">
+                                    </div>
+
+                                    <div style="margin: 8px 0 6px 0; font-size: 12px;">
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span id="vectorizeQuadsThreshLabel">Порог чёрного:</span>
+                                            <span><span id="vectorizeQuadsThreshVal">220</span></span>
+                                        </div>
+                                        <input type="range" id="vectorizeQuadsThresh" min="100" max="250" step="1"
+                                            value="220">
+                                    </div>
+
+                                    <div
+                                        style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 5px;">
+                                        <label
+                                            style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+                                            <input type="checkbox" id="vectorizeQuadsDenoiseCheckbox"
+                                                style="transform: scale(1.1);">
+                                            <span id="vectorizeQuadsDenoiseLabel">Убрать одиночные пиксели</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="vectorize-section">
+                                    <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                                        <button id="vectorizeProcessBtn"
+                                            style="background: #3f7cb9; color: white; border:none;"><span
+                                                id="vectorizeProcess">🔄 Обработать</span></button>
+                                        <button id="vectorizeAutoBtn"
+                                            style="background: #99802c; color: white; border:none;"><span
+                                                id="vectorizeAuto">🧠 Автоподбор</span></button>
+                                        <button id="vectorizeResetBtn"
+                                            style="background: #eb3b3b; color: white; border:none;"><span
+                                                id="vectorizeReset">↺ Сброс</span></button>
+                                    </div>
+                                    <button id="vectorizeApplyBtn"
+                                        style="background: #228025; color: white; margin-top: 8px; border:none;"><span
+                                            id="vectorizeApply">Создать</span></button>
+                                </div>
+
+                                <div class="vectorize-section" style="border: none; background: transparent;">
+                                    <div style="font-size: 11px; color: #888; text-align: center;">
+                                        <span id="vectorizeLinesCreatedLabel">Линий создано</span>: <span
+                                            id="vectorizeLineCount">0</span>
+                                    </div>
+                                    <div id="vectorizeStatus"
+                                        style="font-size: 11px; color: #aaa; text-align: center; margin-top: 4px;">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="panel-select" class="panel-content">
+                            <h2 class="panel-title" id="selectTitleText">Выделение</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="selectDescription">Зажмите и
+                                тяните чтобы выделить зону
+                                для удаления</p>
+                            <div class="block-with-elem"
+                                style="display: flex; justify-content:space-evenly; flex-direction: row;">
+                                <button id="selShapeRect" onclick="setSelectionShape('rect')"
+                                    style="width: 60px; height: 60px;">
+                                    <img src="images/rectSelect.svg" style="height: 100%; width: 100%;">
+                                </button>
+                                <button id="selShapeLasso" onclick="setSelectionShape('lasso')"
+                                    style="width: 60px; height: 60px;">
+                                    <img src="images/lassoSelect.svg" style="height: 100%; width: 100%;">
+                                </button>
+                            </div>
+                            <div class="block-with-elem"
+                                style="display: flex; justify-content:space-evenly; flex-direction: row;">
+                                <button id="selModeAll" onclick="setSelectionMode('all')"
+                                    style="width: 60px; height: 60px;">
+                                    <img src="images/allSelectIcon.svg" alt="Все" style="height: 100%; width: 100%;">
+                                </button>
+                                <button id="selModeLines" onclick="setSelectionMode('lines')"
+                                    style="width: 60px; height: 60px;">
+                                    <img src="images/linesTool.svg" alt="Линии" style="height: 100%; width: 100%;">
+                                </button>
+                                <button id="selModeQuads" onclick="setSelectionMode('quads')"
+                                    style="width: 60px; height: 60px;">
+                                    <img src="images/quadsTool.svg" alt="Квады" style="height: 100%; width: 100%;">
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="panel-text" class="panel-content">
+                            <h2 class="panel-title" id="textTitleText">Текст</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="textDescription">
+                                Кликните по холсту, чтобы создать текстовую зону
+                            </p>
+
+                            <div class="block-with-elem">
+                                <div>
+                                    <span id="fontLabel">Шрифт:</span>
+                                    <select id="fontSelector" style="width: 100%; margin-top: 5px; margin-bottom: 5px;">
+                                        <option value="custom" id="customFontLabel">Свой шрифт...</option>
+                                        <option value="fonts/Times-New-Roman.ttf" selected>Times New Roman</option>
+                                        <option value="fonts/Pixel.ttf">Pixel</option>
+                                        <option value="fonts/Minecraft.ttf">Minecraft</option>
+                                        <option value="fonts/RubikMonoOne-Regular.ttf">RubikMonoOne</option>
+                                        <option value="fonts/MonsieurLaDoulaise.ttf">MonsieurLaDoulaise</option>
+                                        <option value="fonts/Roboto-Regular.ttf">Roboto</option>
+                                    </select>
+                                </div>
+
+                                <div id="customFontDiv" style="display: none;">
+                                    <label for="fontFile" class="file-upload-btn" id="uploadFontLabel">Загрузить свой
+                                        шрифт (.ttf, .otf)</label>
+                                    <input type="file" id="fontFile" accept=".ttf,.otf,.woff" style="display: none;">
+                                </div>
+                                <span id="fontFileName"
+                                    style="display: block; font-size: 12px; color: #777; word-break: break-all;"></span>
+
+                                <div style="margin-top: 10px;">
+                                    <span id="textInputLabel">Текст</span>
+                                    <textarea id="textInputContent" rows="3"
+                                        style="width: 100%; margin-top: 5px; resize: vertical; background: var(--input-bg); color: var(--text-white); border: 1px solid var(--border-col); padding: 5px; border-radius: 6px;"></textarea>
+                                </div>
+
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                                    <span id="fontSizeLabel">Размер шрифта:</span>
+                                    <input type="number" id="textFontSize" step="1" min="0" value="6"
+                                        style="width: 5em">
+                                </div>
+
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="textFillCheckbox" style="transform: scale(1.2);"
+                                        onchange="updateTextPreview()">
+                                    <span id="textFillLabel">Заливка</span>
+                                </label>
+
+                                <div style="display: flex; flex-direction: column; gap: 5px;">
+                                    <span id="simplifyLabel">Упрощение</span>
+                                    <input type="range" id="textSimplifyInput" min="1" max="50" value="0">
+                                </div>
+
+                                <div style="display: flex; gap: 8px; margin-top: 15px;">
+                                    <button id="textCreateBtn"
+                                        style="background: #228025; color: white; flex-grow: 1;">Создать</button>
+                                    <button id="textCancelBtn"
+                                        style="background: #eb3b3b; color: white; flex-grow: 1;">Отмена</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="panel-brush" class="panel-content">
+                            <h2 class="panel-title" id="brushTitleText">Кисть</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="brushDescription">
+                                Зажмите и рисуйте произвольную линию. При отпускании она конвертируется в обычные
+                                четырёхугольники
+                            </p>
+
+                            <div class="block-with-elem" style="margin-top: 10px;">
+                                <div style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+                                    <span id="brushThicknessLabel">Толщина кисти</span>
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <input type="range" id="brushThicknessInput" min="1" max="100" value="10"
+                                            step="0.1"
+                                            oninput="document.getElementById('brushThicknessNumber').value = this.value">
+                                        <input type="number" id="brushThicknessNumber" min="1" max="100" value="10"
+                                            step="0.1" style="width: 60px;"
+                                            oninput="document.getElementById('brushThicknessInput').value = this.value">
+                                    </div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+                                    <span id="brushSimplificationLabel">Упрощение линий</span>
+                                    <input type="range" id="brushSimplifyInput" min="1" max="50" value="10">
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 5px;">
+                                    <span id="brushSmoothingLabel">Сглаживание</span>
+                                    <input type="range" id="brushSmoothInput" min="1" max="15" value="5">
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <div style="display: flex; justify-content:space-evenly; flex-direction: row;">
+                                    <button id="brushModeFlatBtn" onclick="setBrushMode('flat')"
+                                        style="width: 60px; height: 60px; background: var(--input-bg); border-color: transparent;">
+                                        <img src="images/flatBrush.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                    <button id="brushModeRoundBtn" onclick="setBrushMode('round')"
+                                        style="width: 60px; height: 60px; background: transparent; border: 1px solid var(--border-col);">
+                                        <img src="images/roundedBrush.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="panel-fill" class="panel-content">
+                            <h2 class="panel-title" id="fillTitleText">Заливка</h2>
+                            <p style="font-size: 13px; color: #aaa;" id="fillDescription">Кликайте по холсту, чтобы
+                                создать контур для заполнения четырёхугольниками (мин. 3 точки)</p>
+                            <div class="block-with-elem">
+                                <div style="display: flex; flex-direction: column; gap: 5px;">
+                                    <span id="fillOpacityLabel">Непрозрачность предпросмотра</span>
+                                    <input id="fillOpacityInput" type="range" value="0.4" min="0" max="1" step="0.05">
+                                </div>
+                            </div>
+                            <div class="block-with-elem">
+                                <div
+                                    style="font-size: 14px; text-align: center; display: flex; justify-content: space-around;">
+                                    <div><span id="fillPointsCount">Точек:</span> <span id="fillPointsNum"
+                                            style="color: var(--text-white); font-weight: bold;">0</span></div>
+                                    <div><span id="fillQuadsCount">Четырёхугольников:</span> <span id="fillQuadsNum"
+                                            style="color: var(--text-white); font-weight: bold;">0</span></div>
+                                </div>
+                                <div style="display: flex; gap: 8px; margin-top: 5px;">
+                                    <button id="fillCreateBtn"
+                                        style="background: #228025; color: white; flex-grow: 1;">Создать</button>
+                                    <button id="fillCancelBtn"
+                                        style="background: #eb3b3b; color: white; flex-grow: 1;">Отмена</button>
+                                </div>
+                            </div>
+
+                            <button id="fillRestoreBtn">Предыдущая зона</button>
+
+                            <div class="block-with-elem" style="margin-top: 5px;">
+                                <span style="font-size: 13px; text-align: center;" id="areaSelectFillLabel">Выделение
+                                    области</span>
+                                <div
+                                    style="display: flex; justify-content:space-evenly; flex-direction: row; gap: 5px;">
+                                    <button id="fillInputManualBtn" onclick="setFillInputMode('manual')"
+                                        style="width: 60px; height: 60px; background: var(--input-bg); border-color: transparent;">
+                                        <img src="images/manualSelect.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                    <button id="fillInputWandBtn" onclick="setFillInputMode('wand')"
+                                        style="width: 60px; height: 60px; background: transparent; border: 1px solid var(--border-col);">
+                                        <img src="images/magicSelect.svg" style="height: 100%; width: 100%;">
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="block-with-elem" style="margin-top: 5px;">
+                                <span id="fillAreaModeLabel" style="font-size: 13px; text-align: center;">Режим
+                                    области</span>
+                                <div
+                                    style="display: flex; justify-content:space-evenly; flex-direction: row; gap: 5px;">
+                                    <button id="fillRegionSingleBtn" onclick="setFillRegionMode('single')"
+                                        style="width: 60px; height: 60px; flex: 1;"><img src="images/standardFill.svg"
+                                            style="height: 100%; width: 100%;"></button>
+                                    <button id="fillRegionMultiBtn" onclick="setFillRegionMode('multi')"
+                                        style="width: 60px; height: 60px; flex: 1;"><img src="images/multiFill.svg"
+                                            style="height: 100%; width: 100%;"></button>
+                                </div>
+
+                                <div id="fillMultiControls"
+                                    style="display: none; align-items: center; justify-content: center; gap: 5px; margin-top: 8px; border-top: 1px solid var(--border-col); padding-top: 8px;">
+                                    <button onclick="changeFillRegion(-1)"
+                                        style="width: 40px; height: 40px;">&lt;</button>
+                                    <input type="number" id="fillRegionInput" value="1" min="1" step="1"
+                                        style="width: 60px; height: 40px; text-align: center;"
+                                        onchange="setFillRegionFromInput()">
+                                    <button onclick="changeFillRegion(1)"
+                                        style="width: 40px; height: 40px;">&gt;</button>
+                                    <button onclick="addFillRegion()" style="width: 40px; height: 40px;">+</button>
+                                    <button onclick="deleteFillRegion()" style="width: 40px; height: 40px;"><img
+                                            src="images/trashIcon.svg"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="panel-shapes" class="panel-content">
+                            <h2 class="panel-title" id="shapesTitleText">Фигуры</h2>
+                            <p style="font-size: 13px; color: #aaa; margin-top:0;" id="shapesDescription">Выберите
+                                фигуру и кликните по холсту для ее создания</p>
+
+                            <div class="block-with-elem">
+                                <div class="shapes-grid" id="shapesGrid">
+                                    <button class="shape-btn" id="freeShapeToolBtn">
+                                        <img src="images/brushTool.svg" alt="Free shape">
+                                    </button>
+                                    <button class="shape-btn active" data-shape="square">
+                                        <img src="images/squareShape.svg" alt="Square">
+                                    </button>
+                                    <button class="shape-btn" data-shape="triangle">
+                                        <img src="images/triangleShape.svg" alt="Triangle">
+                                    </button>
+                                    <button class="shape-btn" data-shape="circle">
+                                        <img src="images/circleShape.svg" alt="Circle">
+                                    </button>
+                                    <button class="shape-btn" data-shape="star">
+                                        <img src="images/starShape.svg" alt="Star">
+                                    </button>
+                                    <button class="shape-btn" data-shape="animeStar">
+                                        <img src="images/animeStarShape.svg" alt="Anime Star">
+                                    </button>
+                                    <button class="shape-btn" data-shape="heart">
+                                        <img src="images/heartShape.svg" alt="Heart">
+                                    </button>
+                                    <button class="shape-btn" data-shape="checkmark">
+                                        <img src="images/checkmarkShape.svg" alt="Checkmark">
+                                    </button>
+                                    <button class="shape-btn" data-shape="cross">
+                                        <img src="images/crossShape.svg" alt="Cross">
+                                    </button>
+                                </div>
+
+                                <div style="display: flex; gap: 8px; margin-top: 15px;">
+                                    <button id="shapesCreateBtn"
+                                        style="background: #228025; color: white; flex-grow: 1;">Создать</button>
+                                    <button id="shapesCancelBtn"
+                                        style="background: #eb3b3b; color: white; flex-grow: 1;">Отмена</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="shared-drawing-tools"
+                            style="display: none; flex-direction: column; gap: 15px; margin-top: 20px; border-top: 1px solid var(--border-col); padding-top: 15px;">
+                            <div class="panel-with-elem" id="panel-with-refOpacityShared">
+                                <span id="refOpacityTitleShared">Непрозрачность картинки</span>
+                                <input id="refOpacityInputShared" type="range" value="0.5" min="0" max="1" step="0.01"
+                                    oninput="setReferenceOpacityShared(this.value)" style="margin-top: 5px;">
+                            </div>
+                            <div class="panel-with-elem">
+                                <span id="visualRotationTitle">Поворот холста</span>
+                                <div style="display: flex; gap: 5px;">
+                                    <button onclick="changeVisualRotation(-15)" style="flex: 1;">Q</button>
+                                    <input type="number" id="visualRotationInput" step="1" value="0"
+                                        oninput="updateVisualRotation()" style="flex: 3; text-align: center;">
+                                    <button onclick="changeVisualRotation(15)" style="flex: 1;">E</button>
+                                </div>
+                            </div>
+                            <div class="panel-with-elem">
+                                <span id="opacityTitle">Непрозрачность</span>
+                                <input id="opacityInput" type="range" value="1" min="0" max="1" step="0.05"
+                                    style="margin-top: 5px;">
+                            </div>
+
+                            <div class="block-with-elem">
+                                <button id="horizontalAxisBtnLabel" onclick="generateHorizontalAxis()">Горизонтальная
+                                    линия</button>
+                                <button id="verticalAxisBtnLabel" onclick="generateVerticalAxis()">Вертикальная
+                                    линия</button>
+                            </div>
+
+                            <div class="panel-with-elem">
+                                <span id="mirrorLabel" style="font-weight: bold; text-align: center;">Отражение</span>
+                                <div
+                                    style="display: flex; justify-content:space-evenly; flex-direction: row; gap: 4px;">
+                                    <button onclick="transformAllObjects('mirror', 'horz', true)"
+                                        style="flex: 1; height: 40px;">
+                                        <img src="images/mirrorHorizCenter.svg" style="width: 100%; height: 100%;">
+                                    </button>
+                                    <button onclick="transformAllObjects('mirror', 'vert', true)"
+                                        style="flex: 1; height: 40px;">
+                                        <img src="images/mirrorVertCenter.svg" style="width: 100%; height: 100%;">
+                                    </button>
+                                    <button onclick="transformAllObjects('mirror', 'horz', false)"
+                                        style="flex: 1; height: 40px;">
+                                        <img src="images/mirrorHoriz.svg" style="width: 100%; height: 100%;">
+                                    </button>
+                                    <button onclick="transformAllObjects('mirror', 'vert', false)"
+                                        style="flex: 1; height: 40px;">
+                                        <img src="images/mirrorVert.svg" style="width: 100%; height: 100%;">
+                                    </button>
+                                </div>
+                                <div style="display: flex; justify-content: center; gap: 5px;">
+                                    <button onclick="transformAllObjects('transfer', 'horz')"
+                                        style="width: 60px; height: 40px;">
+                                        <img src="images/transferHoriz.svg" style="width: 100%; height: 100%;">
+                                    </button>
+                                    <button onclick="transformAllObjects('transfer', 'vert')"
+                                        style="width: 60px; height: 40px;">
+                                        <img src="images/transferVert.svg" style="width: 100%; height: 100%;">
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="panel-with-elem">
+                                <span id="massLabel"
+                                    style="font-weight: bold; text-align: center; margin-bottom: 5px;">Трансформация</span>
+                                <table>
+                                    <tr>
+                                        <td><span id="massXLabel">Смещение X</span>:</td>
+                                        <td><input id="massX" type="number" value="0" step="0.01" style="width: 100%;">
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><span id="massYLabel">Смещение Y</span>:</td>
+                                        <td><input id="massY" type="number" value="0" step="0.01" style="width: 100%;">
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><span id="massRLabel">Поворот</span>:</td>
+                                        <td><input id="massR" type="number" value="0" step="1" style="width: 100%;">
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><span id="massSXLabel">Масштаб X</span>:</td>
+                                        <td><input id="massSX" type="number" value="1" step="0.01" style="width: 100%;">
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><span id="massSYLabel">Масштаб Y</span>:</td>
+                                        <td><input id="massSY" type="number" value="1" step="0.01" style="width: 100%;">
+                                        </td>
+                                    </tr>
+                                </table>
+                                <button id="massB" onclick="applyMassTransform()"
+                                    style="margin-top: 10px;">Применить</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <div id="objectsMenu">
+        <button id="objectsToggleBtn" onclick="toggleObjectsMenu()">▶</button>
+
+        <div id="objectsMenuIsland" class="menuIsland">
+            <div id="objectsMenuDragger" class="dragger">
+                <span id="objectsTitle">Объекты</span> (<span id="objCount">0</span>)
+            </div>
+            <div class="menuContent">
+                <div id="objectsList"></div>
+                <button id="clearButton" onclick="clearEverything()"
+                    style="flex-shrink: 0; margin-top: 10px; color: #ff5f57; border: 1px solid rgba(255,95,87,0.3);">
+                    Очистить всё
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="infoMenu" class="menuIsland" style="display: none;">
+        <div id="infoMenuDragger" class="dragger">
+            <span id="selObjectTitle">Выбранный объект</span>
+        </div>
+        <div class="menuContent">
+            <div id="infoTableWrapper">
+                <table id="infoTable"></table>
+            </div>
+            <button id="infoDeleteButton"
+                style="display: none; flex-shrink: 0; margin-top: 10px; background: #eb3b3b; color: white; border: none; padding: 8px;">Удалить
+                объект</button>
+        </div>
+    </div>
+
+    <div id="hints"><span id="hintsText"></span></div>
+    <div id="toastNotification" class="toast">Уведомление</div>
+    <div id="errorNotification" class="toast error">Ошибка</div>
+
+    <div id="settingsModalWindow" class="modal-overlay" style="display: none;"
+        onclick="if(event.target===this) this.style.display='none'">
+        <div class="settings-modal-content">
+            <div class="settings-modal-header">
+                <h2 id="settingsTitleText">Настройки</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                    <button onclick='window.open("https://boosty.to/dimas7080", "_blank")'
+                        style="display: flex; align-items: center; gap: 5px; font-size: 1em;" id="boosty-btn">
+                        <img src="images/boosty_icon.svg" alt="boosty" style="height: 2em;">
+                        <span id="boostyText">Boosty</span>
+                    </button>
+                    <button onclick='window.open("https://discord.gg/TJWqaqf4TU", "_blank")'
+                        style="display: flex; align-items: center; gap: 5px; font-size: 1em;" id="discord-server-btn">
+                        <img src="images/discord_icon.svg" alt="discord" style="height: 2em;"> Discord Server
+                    </button>
+                    <button class="settings-modal-close"
+                        onclick="document.getElementById('settingsModalWindow').style.display='none'"
+                        style="display: flex; justify-content: center; align-items: center; width: 40px; height: 40px;">
+                        <img src="images/crossIcon.svg" style="width: 80%; height: 80%;">
+                    </button>
+                </div>
+            </div>
+
+            <div class="settings-tabs-nav">
+                <button class="settings-tab-btn active" data-tab="main" id="mainSettingsTabBtn">Основные</button>
+                <button class="settings-tab-btn" data-tab="controls" id="controlsSettingsTabBtn">Управление</button>
+            </div>
+
+            <div class="settings-body">
+                <div id="settings-tab-main" class="settings-tab-content active">
+                    <div class="settings-row">
+                        <span><span id="appVersionLabel">Версия приложения </span> <span id="appVersionValue">—</span></span>
+                        <button id="checkUpdateBtn" type="button">Проверить наличие обновлений</button>
+                    </div>
+                    <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 6px;">
+                        <span id="sightsFolderPathTitle" style="font-size: 14px; font-weight: 500;">Путь к папке с
+                            прицелами</span>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="text" id="sightsFolderPathInput" readonly
+                                style="flex-grow: 1; background: rgba(0, 0, 0, 0.3); color: #aaa; cursor: default; border: 1px solid var(--border-col); padding: 8px 10px; border-radius: 6px;">
+                            <button id="changeSightsPathBtn" style="white-space: nowrap; padding: 8px 14px;">Изменить
+                                путь</button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <span id="changeLangTitle">Сменить язык:</span>
+                        <img src="images/lang.png" alt="Lang"
+                            style="height: 35px; cursor: pointer; border-radius: 6px; background: white;"
+                            onclick="changeLang()">
+                    </div>
+                    <div class="settings-row">
+                        <span id="themeTitleText">Тема интерфейса:</span>
+                        <button onclick="toggleTheme()" style="padding: 8px 15px;" id="changeThemeLabel">Сменить
+                            тему</button>
+                    </div>
+                    <div class="settings-row">
+                        <span id="colorCanvasLabel">Цвет фона:</span>
+                        <input id="canvasBgColor" type="color" value="#ffffff" oninput="setBgColorCanvas(this.value)"
+                            style="width: 50px; height: 35px; padding: 0;">
+                    </div>
+                    <div class="settings-row">
+                        <span id="outlineCheckBoxTitleText">Отображать обводку:</span>
+                        <input id="outlineCheckBox" type="checkbox" onchange="setOutlineCheckBox(this.checked)"
+                            style="transform: scale(1.5);">
+                    </div>
+                    <div class="settings-row">
+                        <span id="hintsCheckBoxTitleText">Отображать подсказки:</span>
+                        <input id="hintsCheckBox" type="checkbox" onchange="toggleHints(this.checked)" checked
+                            style="transform: scale(1.5);">
+                    </div>
+                    <div class="settings-row">
+                        <span id="drawGridCheckBoxTitleText">Отображать сетку прицела</span>
+                        <input id="drawGridCheckBox" type="checkbox" onchange="toggleDrawGrid(this.checked)" checked
+                            style="transform: scale(1.5);">
+                    </div>
+                    <div class="settings-row">
+                        <span id="drawCrosshairCheckBoxTitleText">Отображать перекрестие прицела</span>
+                        <input type="checkbox" id="drawCrosshairCheckBox" onchange="toggleDrawCrosshair(this.checked)"
+                            checked style="transform: scale(1.5);">
+                    </div>
+                    <label class="settings-row">
+                        <span id="oldSelectionLabel">Старый режим выделения</span>
+                        <input type="checkbox" id="oldSelectionCheckBox" style="transform: scale(1.5);">
+                    </label>
+                </div>
+
+                <div id="settings-tab-controls" class="settings-tab-content">
+                    <button id="resetHotkeysBtn"
+                        style="width: 100%; margin-bottom: 15px; background: #eb3b3b; color: white;">Сбросить
+                        настройки</button>
+                    <div id="hotkeysList" style="display: flex; flex-direction: column; gap: 8px;">
+                        <div class="hotkey-row" style="height: 60px;"></div>
+                        <div class="hotkey-row" style="height: 60px;"></div>
+                        <div class="hotkey-row" style="height: 60px;"></div>
+                        <div class="hotkey-row" style="height: 60px;"></div>
+                        <div class="hotkey-row" style="height: 60px;"></div>
+                        <div class="hotkey-row" style="height: 60px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="export-modal-overlay" id="exportModal">
+        <div class="export-modal-content">
+            <div class="export-header">
+                <h2 id="exportModalTitle">Настройки экспорта прицела</h2>
+                <div style="display: flex; justify-content: space-between; gap: 20px;">
+                    <button class="modal-close" id="closeExportBtn"
+                        style="display: flex; justify-content: center; align-items: center; width: 40px; height: 40px;"><img
+                            src="images/crossIcon.svg" style="width: 80%; height: 80%;"></button>
+                </div>
+            </div>
+            <div class="export-body">
+                <div class="export-row"><label id="exportRangefinderProgressBarColor1">Цвет шкалы прогрессбара</label>
+                    <div style="display: flex; gap: 5px; align-items: center;"><input type="color" id="exp-color1"
+                            value="#00ff00" onchange="updateColorValues('color1', this.value)"><span
+                            id="exp_color1_values">0,255,0,64</span><input type="hidden" id="exp_color1_a" value="64">
+                    </div>
+                </div>
+                <div class="export-row"><label id="exportRangefinderProgressBarColor2">Цвет фона шкалы</label>
+                    <div style="display: flex; gap: 5px; align-items: center;"><input type="color" id="exp_color2"
+                            value="#ffffff" onchange="updateColorValues('color2', this.value)"><span
+                            id="exp_color2_values">255,255,255,64</span><input type="hidden" id="exp_color2_a"
+                            value="64"></div>
+                </div>
+                <div class="export-row"><label id="exportCrosshairColor">Цвет прицела</label>
+                    <div style="display: flex; gap: 5px; align-items: center;"><input type="color" id="exp_color3"
+                            value="#1fef1f" onchange="updateColorValues('color3', this.value)"><span
+                            id="exp_color3_values">31,239,31,255</span><input type="hidden" id="exp_color3_a"
+                            value="255"></div>
+                </div>
+                <div class="export-row"><label id="exportCrosshairLightColor">Цвет подсветки</label>
+                    <div style="display: flex; gap: 5px; align-items: center;"><input type="color" id="exp_color4"
+                            value="#ff1e1e" onchange="updateColorValues('color4', this.value)"><span
+                            id="exp_color4_values">255,30,30,255</span><input type="hidden" id="exp_color4_a"
+                            value="255"></div>
+                </div>
+                <div class="export-row"><label id="exportRangefinderTextScale">Масштаб текста</label><input
+                        type="number" id="exp_rangefinderTextScale" value="0.7" step="0.1" style="width: 70px;"></div>
+                <div class="export-row"><label id="exportRangefinderVerticalOffset">Смещение по вертикали</label><input
+                        type="number" id="exp_rangefinderVerticalOffset" value="18" step="0.1" style="width: 70px;">
+                </div>
+                <div class="export-row"><label id="exportRangefinderHorizontalOffset">Смещение по
+                        горизонтали</label><input type="number" id="exp_rangefinderHorizontalOffset" value="5"
+                        step="0.1" style="width: 70px;"></div>
+                <div class="export-row"><label id="exportFontSizeMult">Масштаб текста и цифр</label><input type="number"
+                        id="exp_fontSizeMult" value="1" step="0.1" style="width: 70px;"></div>
+                <div class="export-row"><label id="exportLineSizeMult">Толщина линий</label><input type="number"
+                        id="exp_lineSizeMult" value="1" step="0.1" style="width: 70px;"></div>
+                <div class="export-row">
+                    <label id="exportMaxDist">Макс. дистанция</label>
+                    <input type="number" id="exp_maxDist" value="6000" step="200" min="200" style="width: 70px;">
+                </div>
+                <div class="export-row">
+                    <span id="exportTextPosLabel">Смещение текста дальности</span>
+                    <input type="number" id="exp_textPosX" value="0.14" step="0.01" style="width: 80px;">
+                </div>
+
+                <div class="export-row"><label id="exportDrawCentralLineVert">Вертикальная линия</label><input
+                        type="checkbox" id="exp_drawCentralLineVert" checked></div>
+                <div class="export-row"><label id="exportDrawCentralLineHorz">Горизонтальная линия</label><input
+                        type="checkbox" id="exp_drawCentralLineHorz" checked></div>
+                <div class="export-row" style="flex-direction: column; align-items: flex-start;"><label
+                        id="exportCdhsa1">Длина делений на центральной:</label>
+                    <div
+                        style="display: flex; gap: 10px; margin-top: 5px; width: 100%; justify-content: space-between;">
+                        <span id="withTheValue"></span><input type="number" id="exp_cdhsa1" value="0.005" step="0.001"
+                            style="width: 80px;"><span id="withoutTheValue"></span><input type="number" id="exp_cdhsa2"
+                            value="0.003" step="0.001" style="width: 80px;">
+                    </div>
+                </div>
+                <div class="export-row" style="flex-direction: column; align-items: flex-start;"><label
+                        id="exportCdhsm1">Длина делений слева от центр:</label>
+                    <div
+                        style="display: flex; gap: 10px; margin-top: 5px; width: 100%; justify-content: space-between;">
+                        <span id="withTheValue2"></span><input type="number" id="exp_cdhsm1" value="0" step="0.01"
+                            style="width: 80px;"><span id="withoutTheValue2"></span><input type="number" id="exp_cdhsm2"
+                            value="0" step="0.01" style="width: 80px;">
+                    </div>
+                </div>
+                <div class="export-row" style="flex-direction: column; align-items: flex-start;"><label
+                        id="exportDcp1">Смещение поправки:</label>
+                    <div
+                        style="display: flex; gap: 10px; margin-top: 5px; width: 100%; justify-content: space-between;">
+                        <span id="expPlusRightMinusLeft"></span><input type="number" id="exp_dcp1" value="0.02"
+                            step="0.01" style="width: 80px;"><span id="expPlusDownMinusUp"></span><input type="number"
+                            id="exp_dcp2" value="-0.005" step="0.01" style="width: 80px;">
+                    </div>
+                </div>
+                <div class="export-row"><label id="exportDrawDistanceCorrection">Текст поправки дальности</label><input
+                        type="checkbox" id="exp_drawDistanceCorrection" checked></div>
+                <div class="export-row"><label id="exportUseSmoothEdge">Сглаживание граней</label><input type="checkbox"
+                        id="exp_useSmoothEdge"></div>
+                <div class="export-row"><label id="exportRangefinderUseThousandth">Текст полученной
+                        дальности</label><input type="checkbox" id="exp_rangefinderUseThousandth" checked></div>
+                <div class="export-row"><label id="exportDetectAllyTextScale">Размер текста обнаружения</label><input
+                        type="number" id="exp_detectAllyTextScale" value="0.7" step="0.1" style="width: 70px;"></div>
+                <div class="export-row" style="flex-direction: column; align-items: flex-start;"><label
+                        id="exportDetectAllyOffset1">Смещение текста обнаружения:</label>
+                    <div
+                        style="display: flex; gap: 10px; margin-top: 5px; width: 100%; justify-content: space-between;">
+                        <span id="expPlusRightMinusLeft2"></span><input type="number" id="exp_detectAllyOffset_1"
+                            value="4" step="0.01" style="width: 80px;"><span id="expPlusUpMinusDown"></span><input
+                            type="number" id="exp_detectAllyOffset_2" value="0.025" step="0.01" style="width: 80px;">
+                    </div>
+                </div>
+            </div>
+            <div class="export-buttons">
+                <button id="cancelExportBtn"
+                    style="background: transparent; border: 1px solid var(--border-col);">Отмена</button>
+                <button id="saveAsBlkBtn" style="background: #3f7cb9; color: white;">Сохранить файл .blk в...</button>
+                <button id="generateBlkBtn" style="background: #3f7cb9; color: white;">Экспортировать как .blk</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="sightPreviewOverlay" class="preview-overlay" style="display: none;">
+        <div class="preview-container">
+            <img src="images/preview.png" id="previewBackground" alt="Preview Background">
+
+            <canvas id="previewCanvas"></canvas>
+
+            <div class="toggle-btn preview-close-btn" onclick="toggleSightPreview()">
+                <img src="images/preview-btn.svg" alt="preview button" style="height: 60%;">
+            </div>
+
+            <div id="previewMenuWrapper" class="preview-menu-wrapper">
+                <button id="previewToggleBtn" onclick="togglePreviewMenu()">▶</button>
+
+                <div class="preview-controls" id="previewControlsIsland">
+                    <label style="flex-direction: column; align-items: flex-start; gap: 5px;">
+                        <span id="previewBgText">Выбор фона:</span>
+                        <select id="previewBgSelect" onchange="changePreviewBackground()" style="width: 100%;">
+                            <option value="standard" id="bgStandardPreviewText" selected>Стандартный</option>
+                            <option value="sinai" id="bgSinaiPreviewText">Синай</option>
+                            <option value="breslau" id="bgBreslauPreviewText">Бреслау</option>
+                            <option value="poland" id="bgPolandPreviewText">Поля Польши</option>
+                            <option value="ardennes" id="bgArdennesPreviewText">Арденны</option>
+                            <option value="testdrive" id="bgTestDrivePreviewText">Пробный выезд</option>
+                        </select>
+                    </label>
+                    <label style="flex-direction: column; align-items: flex-start; gap: 5px;">
+                        <span id="previewColorText">Цвет прицела:</span>
+                        <select id="previewColorSelect" onchange="drawPreview()" style="width: 100%;">
+                            <option id="colorBlack" value="#000000" style="background: #000000; color: #fff;" selected>
+                                Черный</option>
+                            <option id="colorWhite" value="#ffffff" style="background: #ffffff; color: #000;">Белый
+                            </option>
+                            <option id="colorBrightGreen" value="#00ff3c" style="background: #00ff3c; color: #000;">
+                                Ярко-зеленый</option>
+                            <option id="colorGreen" value="#14ff00" style="background: #14ff00; color: #000;">Зеленый
+                            </option>
+                            <option id="colorLime" value="#82ff00" style="background: #82ff00; color: #000;">Салатовый
+                            </option>
+                            <option id="colorYellow" value="#ffff00" style="background: #ffff00; color: #000;">Желтый
+                            </option>
+                            <option id="colorOrange" value="#ff8800" style="background: #ff8800; color: #000;">Оранжевый
+                            </option>
+                            <option id="colorRed" value="#ff2400" style="background: #ff2400; color: #000;">Красный
+                            </option>
+                            <option id="colorCyan" value="#00c8ff" style="background: #00c8ff; color: #000;">Голубой
+                            </option>
+                            <option id="colorBlue" value="#0064ff" style="background: #0064ff; color: #fff;">Синий
+                            </option>
+                        </select>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="previewDrawCentralLineVert" checked onchange="drawPreview()">
+                        <span id="drawVertLinePreviewText">Верт. линия</span>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="previewDrawCentralLineHorz" checked onchange="drawPreview()">
+                        <span id="drawHorzLinePreviewText">Гориз. линия</span>
+                    </label>
+                    <label id="previewThermalRow">
+                        <input type="checkbox" id="previewThermalToggle" onchange="toggleThermalMode()">
+                        <span id="thermalPreviewText">Тепловизор</span>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="previewDrawTicks" checked onchange="drawPreview()">
+                        <span id="dashPreviewText">Деления</span>
+                    </label>
+                    <label>
+                        <span id="spacingPreviewText">Расстояние:</span>
+                        <input type="number" id="previewTickSpacing" min="0.1" value="0.4" step="0.1"
+                            style="width: 60px; background: var(--input-bg); color: var(--text-white); border: 1px solid var(--border-col); border-radius: 4px; padding: 2px 5px;"
+                            oninput="drawPreview()">
+                    </label>
+                    <label>
+                        <span id="maxDistPreviewText">Макс. дистанция:</span>
+                        <input type="number" id="previewMaxDist" value="6000" min="200" max="6000" step="200"
+                            style="width: 60px; background: var(--input-bg); color: var(--text-white); border: 1px solid var(--border-col); border-radius: 4px; padding: 2px 5px;"
+                            oninput="this.value = Math.round(this.value / 200) * 200; drawPreview();">
+                    </label>
+                    <label>
+                        <span id="textPosPreviewText">Сдвиг текста</span>
+                        <input type="number" id="previewTextPosX" value="0.14" step="0.01"
+                            style="width: 60px; background: var(--input-bg); color: var(--text-white); border: 1px solid var(--border-col); border-radius: 4px; padding: 2px 5px;">
+                    </label>
+                    <button onclick="takePreviewScreenshot()" class="preview-screenshot-btn">
+                        <span id="screenshotPreviewText">Сделать скриншот</span>
+                    </button>
+                    <button onclick="takePreviewScreenshot(true)" class="preview-screenshot-btn">
+                        <span id="screenshotSaveAsPreviewText">Сохранить скриншот как...</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="canvasContextMenu" class="canvas-context-menu">
+        <button type="button" class="ctx-menu-item" data-action="copy">
+            <span class="ctx-menu-label" id="ctxCopy">Копировать</span>
+        </button>
+        <button type="button" class="ctx-menu-item" data-action="paste">
+            <span class="ctx-menu-label" id="ctxPaste">Вставить</span>
+        </button>
+        <button type="button" class="ctx-menu-item" data-action="delete">
+            <span class="ctx-menu-label" id="ctxDelete">Удалить</span>
+        </button>
+        <div class="ctx-menu-separator"></div>
+        <button type="button" class="ctx-menu-item" data-action="undo">
+            <span class="ctx-menu-label" id="ctxUndo">Отмена</span>
+        </button>
+        <button type="button" class="ctx-menu-item" data-action="redo">
+            <span class="ctx-menu-label" id="ctxRedo">Вернуть</span>
+        </button>
+        <div class="ctx-menu-separator"></div>
+        <button type="button" class="ctx-menu-item" data-action="save">
+            <span class="ctx-menu-label" id="ctxSave">Принудительно сохранить</span>
+        </button>
+        <button type="button" class="ctx-menu-item" data-action="export">
+            <span class="ctx-menu-label" id="ctxExport">Экспортировать прицел</span>
+        </button>
+    </div>
+
+    <script src="scripts/clipper.js"></script>
+    <script src="scripts/ui-manager.js"></script>
+    <script src="scripts/util.js"></script>
+    <script src="scripts/drawing.js"></script>
+    <script src="scripts/lang.js"></script>
+    <script src="scripts/v2.js"></script>
+    <script src="scripts/jszip.min.js"></script>
+    <script src="scripts/saveload.js"></script>
+    <script src="scripts/draggableIslands.js"></script>
+    <script src="scripts/undo.js"></script>
+    <script src="scripts/redo.js"></script>
+    <script src="scripts/reference.js"></script>
+    <script src="scripts/tools.js"></script>
+    <script src="scripts/curve.js"></script>
+    <script src="scripts/canvas.js"></script>
+    <script src="scripts/autosave.js"></script>
+    <script src="scripts/updater.js"></script>
+    <script src="scripts/exportblkmenu.js"></script>
+    <script src="scripts/hatch.js"></script>
+    <script src="scripts/vectorize.js"></script>
+    <script src="scripts/opentype.min.js"></script>
+    <script src="scripts/text-tool.js"></script>
+    <script src="scripts/brush.js"></script>
+    <script src="scripts/fill.js"></script>
+    <script src="scripts/shapes.js"></script>
+</body>
+
+</html>

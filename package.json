@@ -1,0 +1,51 @@
+{
+  "name": "wtdsight-app",
+  "version": "1.0.0",
+  "description": "WTDSight",
+  "main": "electron/main.js",
+  "author": "dimas7080",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:publish": "electron-builder --publish always"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.16.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "build": {
+    "appId": "com.dimas7080.wtdsight",
+    "productName": "WTDSight",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "app/**/*",
+      "electron/**/*"
+    ],
+    "icon": "app/images/logo",
+    "publish": {
+      "provider": "github",
+      "owner": "dimas70800",
+      "repo": "WTDSight_App",
+      "releaseType": "release" 
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "mac": {
+      "target": "dmg"
+    }
+  }
+}

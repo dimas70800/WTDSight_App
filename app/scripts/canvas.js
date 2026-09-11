@@ -1,0 +1,3403 @@
+const canvas = el("mainCanvas");
+const ctx = canvas.getContext("2d", { willReadFrequently: false });
+
+function resizeCanvas() {
+    // Коэффициент масштабирования пикселей
+    const dpr = window.devicePixelRatio || 1;
+
+    // Физический размер холста
+    canvas.width = Math.round(window.innerWidth * dpr);
+    canvas.height = Math.round(window.innerHeight * dpr);
+
+    // CSS-размер холста
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+}
+window.addEventListener("resize", resizeCanvas);
+
+resizeCanvas();
+
+// Positioning
+let screenPos = { x: 0, y: 0 }; // In sight coordinates
+let screenZoom = 1 / 1.21; // Sight scale * zoom * 2000 = pixels
+// Zoom = 1 => 0.5 sight = 1000 pixels, zoom = 2 => 0.5 sight = 2000 pixels
+function getBaseScale() {
+    return canvas.height * (2000 / 2160);
+}
+
+// Эта функция будет возвращать коэффициент толщины
+// Если экран меньше 4K, она будет уменьшать lineWidth
+function getLineWidth(baseWidth) {
+    return baseWidth * (canvas.height / 2160) * 1.5;
+}
+
+const rnd = (v) => Math.round(v * 10000000) / 10000000;
+
+// Selection tool variables
+let selectionRect = null;      // { startX, startY, endX, endY } в мировых координатах
+let isSelecting = false;
+let selectedObjectsSet = new Set();
+let selectionShapeMode = 'rect';
+let lassoPoints = [];
+
+let transformState = {
+    active: false,
+    action: null,
+    box: null,
+    initialBox: null,
+    initialMousePos: null,
+    initialData: [],
+    startAngle: 0,
+    selectedIdsHash: "",
+    boxStartCx: 0,
+    boxStartCy: 0
+};
+
+function updateTransformBoxFromSelection() {
+    if (selectedObjectsSet.size === 0) {
+        transformState.box = null;
+        transformState.selectedIdsHash = "";
+        return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const id of selectedObjectsSet) {
+        const obj = objects.get(id);
+        if (!obj) continue;
+        const pts = obj.type === 'line' ? [obj.start, obj.end] : [obj.pos1, obj.pos2, obj.pos3, obj.pos4];
+        for (let p of pts) {
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+        }
+    }
+    const w = Math.max(maxX - minX, 0.01);
+    const h = Math.max(maxY - minY, 0.01);
+
+    transformState.box = {
+        cx: minX + w / 2, cy: minY + h / 2,
+        w: w, h: h, angle: 0
+    };
+    transformState.selectedIdsHash = Array.from(selectedObjectsSet).sort().join(',');
+}
+
+function getTransformHandles(box) {
+    if (!box) return [];
+    const { cx, cy, w, h, angle } = box;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+
+    const localPts = {
+        scale_tl: { x: -w / 2, y: -h / 2 },
+        scale_t: { x: 0, y: -h / 2 },
+        scale_tr: { x: w / 2, y: -h / 2 },
+        scale_r: { x: w / 2, y: 0 },
+        scale_br: { x: w / 2, y: h / 2 },
+        scale_b: { x: 0, y: h / 2 },
+        scale_bl: { x: -w / 2, y: h / 2 },
+        scale_l: { x: -w / 2, y: 0 },
+        rotate: { x: 0, y: -h / 2 - 30 / screenZoom / getBaseScale() }
+    };
+
+    return Object.entries(localPts).map(([id, pt]) => ({
+        id: id,
+        p: { x: cx + pt.x * cos - pt.y * sin, y: cy + pt.x * sin + pt.y * cos }
+    }));
+}
+
+let isDraggingSelected = false;
+let dragStartPos = null;
+let dragObjectsData = null;
+
+let isPullingCenter = false;
+let centerPullSource = null;
+let centerPullStartData = null;
+
+let isAnimatingDrawing = false;
+let animatedObjectsList = [];
+let animationProgress = 0;
+let animationSpeed = 1;
+let animationSpeedMultiplier = 1;
+
+let gridSize = 0.1; // Size of grid cell in sight scale
+
+let mousePos = { x: 0, y: 0 };
+let mousePosWindow = { x: 0, y: 0 }
+let lastMousePosCanvas = { x: 0, y: 0 };
+
+let ctxBgColor = "#ffffff";
+let drawGridEnabled = true;
+let drawCrosshairEnabled = true;
+
+function setOutlineCheckBox(val) {
+    el("outlineCheckBox").checked = val;
+    if (typeof saveAllSettings === 'function') saveAllSettings();
+}
+
+
+const colorPicker = el("canvasBgColor");
+if (colorPicker) {
+    colorPicker.value = ctxBgColor;
+}
+
+function setBgColorCanvas(clr) {
+    ctxBgColor = clr;
+    if (typeof saveAllSettings === 'function') saveAllSettings();
+}
+
+function toggleDrawGrid(show) {
+    drawGridEnabled = show;
+    el("drawGridCheckBox").checked = show;
+    if (typeof saveAllSettings === 'function') saveAllSettings();
+}
+
+function toggleDrawCrosshair(show) {
+    drawCrosshairEnabled = show;
+    el("drawCrosshairCheckBox").checked = show;
+    if (typeof saveAllSettings === 'function') saveAllSettings();
+}
+
+let globalVisualRotation = 0;
+
+function updateVisualRotation() {
+    const input = document.getElementById("visualRotationInput");
+    if (input) {
+        globalVisualRotation = parseFloat(input.value) || 0;
+    }
+}
+
+function changeVisualRotation(delta) {
+    const input = document.getElementById("visualRotationInput");
+    if (input) {
+        let current = parseFloat(input.value) || 0;
+        current += delta;
+        input.value = current;
+        updateVisualRotation();
+    }
+}
+
+function render() {
+    ctx.fillStyle = ctxBgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    if (globalVisualRotation !== 0) {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(globalVisualRotation * Math.PI / 180);
+        ctx.translate(-canvas.width / 2, -canvas.height / 2);
+    }
+
+    for (let i = 0; i < 3; i++) drawReference(i);
+    if (drawGridEnabled) {
+        drawGrid();
+    }
+    if(drawCrosshairEnabled){
+        drawCrosshair();
+    }
+    drawStuff();
+    drawArrows();
+    drawGhost();
+
+    ctx.restore();
+    requestAnimationFrame(render);
+}
+
+render();
+
+function v2disposSight2v2sight(disposSight) {
+    return { x: disposSight.x - screenPos.x, y: disposSight.y - screenPos.y };
+}
+
+function sight2pixel(sight) {
+    return sight * screenZoom * getBaseScale();
+}
+
+function v2sight2v2pixel(sight) {
+    return { x: sight.x * screenZoom * getBaseScale(), y: sight.y * screenZoom * getBaseScale() };
+}
+
+function v2pixel2v2canvas(pixel) {
+    return { x: pixel.x + canvas.width / 2, y: pixel.y + canvas.height / 2 };
+}
+
+function v2pixel2v2sight(pixel) {
+    return { x: pixel.x / screenZoom / getBaseScale(), y: pixel.y / screenZoom / getBaseScale() };
+}
+
+function v2disposSight2v2canvas(disposSight) {
+    return v2pixel2v2canvas(v2sight2v2pixel(v2disposSight2v2sight(disposSight)));
+}
+
+function v2canvas2v2pixel(canv) {
+    return { x: canv.x - canvas.width / 2, y: canv.y - canvas.height / 2 };
+}
+
+function v2sight2v2disposSight(sight) {
+    return { x: sight.x + screenPos.x, y: sight.y + screenPos.y };
+}
+
+function v2canvas2v2disposSight(canv) {
+    return v2sight2v2disposSight(v2pixel2v2sight(v2canvas2v2pixel(canv)));
+}
+
+function drawCrosshair() {
+    const crossSightPos = { x: 0, y: 0 };
+    const crossPixelPos = v2sight2v2pixel(v2disposSight2v2sight(crossSightPos));
+    const crossCanvasPos = v2pixel2v2canvas(crossPixelPos);
+
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.beginPath();
+
+    const infinity = 10000;
+
+    ctx.moveTo(crossCanvasPos.x - infinity, crossCanvasPos.y);
+    ctx.lineTo(crossCanvasPos.x + infinity, crossCanvasPos.y);
+
+    ctx.moveTo(crossCanvasPos.x, crossCanvasPos.y - infinity);
+    ctx.lineTo(crossCanvasPos.x, crossCanvasPos.y + infinity);
+
+    ctx.stroke();
+}
+
+function drawGrid() {
+    ctx.lineWidth = getLineWidth(1);
+
+    const gridHalfWidth = 9 * gridSize;
+    const gridHalfHeight = 5 * gridSize;
+
+    for (let z = 1; (0.5 * Math.pow(10, z - 1) < screenZoom) || (z === 1); z++) {
+        const alpha = 0.25 * Math.pow(0.7, z - 1);
+        const gridStep = gridSize * Math.pow(0.1, z - 1);
+
+        ctx.strokeStyle = "rgba(0, 0, 0, " + alpha.toString() + ")";
+        ctx.beginPath();
+
+        const stepsX = Math.round((gridHalfWidth * 2) / gridStep);
+        const stepsY = Math.round((gridHalfHeight * 2) / gridStep);
+
+        for (let i = 0; i <= stepsY; i++) {
+            const y = -gridHalfHeight + i * gridStep;
+            const from = v2disposSight2v2canvas({ x: -gridHalfWidth, y: y });
+            const to = v2disposSight2v2canvas({ x: gridHalfWidth, y: y });
+
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+        }
+
+        for (let j = 0; j <= stepsX; j++) {
+            const x = -gridHalfWidth + j * gridStep;
+            const from = v2disposSight2v2canvas({ x: x, y: -gridHalfHeight });
+            const to = v2disposSight2v2canvas({ x: x, y: gridHalfHeight });
+
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+        }
+
+        ctx.closePath();
+        ctx.stroke();
+    }
+}
+
+function massTransformPoint(point, x, y, r, sx, sy) {
+    let newX = point.x;
+    let newY = point.y;
+
+    const tempX = newX * Math.cos(r) - newY * Math.sin(r);
+    const tempY = newX * Math.sin(r) + newY * Math.cos(r);
+
+    newX = tempX * sx + x;
+    newY = tempY * sy + y;
+
+    return { x: newX, y: newY };
+}
+
+function drawStuff() {
+    const timeSin = ((Math.sin(Date.now() * 0.01)) * 0.25) + 0.75;
+
+    const mass = getMassTransform();
+
+    let drawMassGhost = false;
+
+    if (mass.x !== 0 || mass.y !== 0 || mass.r !== 0 || mass.sx !== 1 || mass.sy !== 1) {
+        drawMassGhost = true;
+        el("massB").disabled = false;
+    }
+    else {
+        el("massB").disabled = true;
+    }
+
+    const opacity = el("opacityInput").value;
+
+    function drawStuffObject(object, c, w, transformationFunc) {
+        const opacity = el("opacityInput").value;
+        const outlineColor = `rgba(255, 255, 255, ${opacity})`;
+        const outlineCheckBoxVal = el("outlineCheckBox").checked;
+
+        switch (object.type) {
+            case "line":
+                const from = v2disposSight2v2canvas(transformationFunc(object.start, mass.x, mass.y, mass.r, mass.sx, mass.sy));
+                const to = v2disposSight2v2canvas(transformationFunc(object.end, mass.x, mass.y, mass.r, mass.sx, mass.sy));
+
+                if (outlineCheckBoxVal) {
+                    ctx.beginPath();
+                    ctx.moveTo(from.x, from.y);
+                    ctx.lineTo(to.x, to.y);
+                    ctx.strokeStyle = outlineColor;
+                    ctx.lineWidth = getLineWidth(w + 1);
+                    ctx.stroke();
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(from.x, from.y);
+                ctx.lineTo(to.x, to.y);
+                ctx.strokeStyle = c;
+                ctx.lineWidth = getLineWidth(w);
+                ctx.stroke();
+                break;
+
+            case "quad":
+                const pos1 = v2disposSight2v2canvas(transformationFunc(object.pos1, mass.x, mass.y, mass.r, mass.sx, mass.sy));
+                const pos2 = v2disposSight2v2canvas(transformationFunc(object.pos2, mass.x, mass.y, mass.r, mass.sx, mass.sy));
+                const pos3 = v2disposSight2v2canvas(transformationFunc(object.pos3, mass.x, mass.y, mass.r, mass.sx, mass.sy));
+                const pos4 = v2disposSight2v2canvas(transformationFunc(object.pos4, mass.x, mass.y, mass.r, mass.sx, mass.sy));
+
+                if (outlineCheckBoxVal) {
+                    ctx.beginPath();
+                    ctx.moveTo(pos1.x, pos1.y);
+                    ctx.lineTo(pos2.x, pos2.y);
+                    ctx.lineTo(pos3.x, pos3.y);
+                    ctx.lineTo(pos4.x, pos4.y);
+                    ctx.closePath();
+                    ctx.strokeStyle = outlineColor;
+                    ctx.lineWidth = getLineWidth(w + 1);
+                    ctx.stroke();
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(pos1.x, pos1.y);
+                ctx.lineTo(pos2.x, pos2.y);
+                ctx.lineTo(pos3.x, pos3.y);
+                ctx.lineTo(pos4.x, pos4.y);
+                ctx.closePath();
+                ctx.fillStyle = c;
+                ctx.fill();
+                break;
+        }
+    }
+
+    if (isAnimatingDrawing) {
+        let count = 0;
+        for (const object of animatedObjectsList) {
+            if (count > animationProgress) break;
+
+            const color = "rgba(0, 0, 0, " + opacity + ")";
+            drawStuffObject(object, color, 1, (point, x, y, r, sx, sy) => { return point; });
+            count++;
+        }
+
+        animationProgress += animationSpeed;
+        if (animationProgress >= animatedObjectsList.length + (60 * animationSpeed)) {
+            stopDrawingAnimation();
+        }
+    } else {
+        for (const [id, object] of objects) {
+            const color = !object.selected ? "rgba(0, 0, 0, " + opacity + ")" : "rgba(0, 0, 255, " + timeSin.toString() + ")";
+            const width = !object.selected ? 1 : 3;
+
+            drawStuffObject(object, color, width, (point, x, y, r, sx, sy) => { return point; });
+        }
+    }
+
+    if (drawMassGhost) {
+        for (const [id, object] of objects) {
+            drawStuffObject(object, "rgba(0, 128, 0, 0.5)", 1, massTransformPoint);
+        }
+    }
+
+    ctx.lineWidth = getLineWidth(1);
+}
+
+function getMousePos(offsetX, offsetY) {
+    let rawX = offsetX * (canvas.width / canvas.clientWidth);
+    let rawY = offsetY * (canvas.height / canvas.clientHeight);
+
+    if (globalVisualRotation !== 0) {
+        const rad = -globalVisualRotation * Math.PI / 180;
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        const dx = rawX - cx;
+        const dy = rawY - cy;
+
+        return {
+            x: dx * Math.cos(rad) - dy * Math.sin(rad) + cx,
+            y: dx * Math.sin(rad) + dy * Math.cos(rad) + cy
+        };
+    }
+
+    return { x: rawX, y: rawY };
+}
+
+function drawGhost() {
+    if (window.vectorizeTempLines && window.vectorizeTempLines.length > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = "rgba(100, 200, 100, 0.9)";
+        ctx.lineWidth = getLineWidth(1.5);
+
+        for (const line of window.vectorizeTempLines) {
+            const from = v2disposSight2v2canvas(line.start);
+            const to = v2disposSight2v2canvas(line.end);
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+    if (window.vectorizeTempQuads && window.vectorizeTempQuads.length > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = "rgba(100, 200, 100, 0.9)";
+
+        for (const q of window.vectorizeTempQuads) {
+            const p1 = v2disposSight2v2canvas(q.pos1);
+            const p2 = v2disposSight2v2canvas(q.pos2);
+            const p3 = v2disposSight2v2canvas(q.pos3);
+            const p4 = v2disposSight2v2canvas(q.pos4);
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.lineTo(p4.x, p4.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+    if (typeof mousePos === "undefined") return;
+
+    let mousePosCanvas;
+    let trueMousePosCanvas;
+
+    if (!snapping) {
+        trueMousePosCanvas = mousePosCanvas = v2disposSight2v2canvas(mousePos);
+    }
+    else {
+        trueMousePosCanvas = v2disposSight2v2canvas(mousePos);
+
+        const snapPos = snappingPos(mousePos);
+        if (snapPos != null)
+            mousePosCanvas = v2disposSight2v2canvas(snapPos);
+        else
+            mousePosCanvas = trueMousePosCanvas;
+    }
+
+    ctx.lineWidth = getLineWidth(1);
+
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+
+    function drawCircle(x, y, r) {
+        ctx.beginPath();
+        ctx.arc(x, y, getLineWidth(r), 0, 2 * Math.PI, false);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    function drawLine(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.closePath();
+        ctx.stroke();
+    }
+
+    function drawQuad(coords) {
+        ctx.beginPath();
+        ctx.moveTo(coords[0].x, coords[0].y);
+        for (let i = 1; i < coords.length; i++) ctx.lineTo(coords[i].x, coords[i].y);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    switch (tool) {
+        case "lines":
+            if (drawing) {
+                const from = v2disposSight2v2canvas(startPos);
+                const to = trueMousePosCanvas;
+
+                const outlineCheckBoxVal = el("outlineCheckBox").checked;
+
+                if (outlineCheckBoxVal) {
+                    ctx.beginPath();
+                    ctx.moveTo(from.x, from.y);
+                    ctx.lineTo(to.x, to.y);
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+                    ctx.lineWidth = getLineWidth(1);
+                    ctx.stroke();
+                }
+
+                drawLine(from.x, from.y, to.x, to.y);
+            }
+
+            if (snapping) {
+                drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+            }
+
+            break;
+
+        case "quads":
+            if (snapping) {
+                drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+            }
+
+            if (quadPos.length === 0) {
+                if (drawing && !snapping) {
+                    drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+                }
+            }
+            else if (quadPos.length === 1) {
+                if (!drawing) {
+                    drawCircle(v2disposSight2v2canvas(quadPos[0]).x, v2disposSight2v2canvas(quadPos[0]).y, 10);
+                }
+
+                drawLine(v2disposSight2v2canvas(quadPos[0]).x, v2disposSight2v2canvas(quadPos[0]).y, mousePosCanvas.x, mousePosCanvas.y);
+            }
+            else if (quadPos.length === 2) {
+                if (!drawing) {
+                    drawLine(v2disposSight2v2canvas(quadPos[0]).x, v2disposSight2v2canvas(quadPos[0]).y, v2disposSight2v2canvas(quadPos[1]).x, v2disposSight2v2canvas(quadPos[1]).y);
+                }
+                else {
+                    drawQuad([
+                        { x: v2disposSight2v2canvas(quadPos[0]).x, y: v2disposSight2v2canvas(quadPos[0]).y },
+                        { x: v2disposSight2v2canvas(quadPos[1]).x, y: v2disposSight2v2canvas(quadPos[1]).y },
+                        { x: mousePosCanvas.x, y: mousePosCanvas.y },
+                    ]);
+                }
+
+                drawLine(v2disposSight2v2canvas(quadPos[1]).x, v2disposSight2v2canvas(quadPos[1]).y, mousePosCanvas.x, mousePosCanvas.y);
+            }
+            else if (quadPos.length === 3) {
+                drawQuad([
+                    { x: v2disposSight2v2canvas(quadPos[0]).x, y: v2disposSight2v2canvas(quadPos[0]).y },
+                    { x: v2disposSight2v2canvas(quadPos[1]).x, y: v2disposSight2v2canvas(quadPos[1]).y },
+                    { x: v2disposSight2v2canvas(quadPos[2]).x, y: v2disposSight2v2canvas(quadPos[2]).y },
+                    { x: mousePosCanvas.x, y: mousePosCanvas.y },
+                ]);
+            }
+
+            break;
+        case "hatch":
+            let hRegions = (typeof isMultiRegionMode !== 'undefined' && isMultiRegionMode) ? hatchRegions : [hatchPoints];
+            if (!hRegions) hRegions = [];
+
+            for (let rIdx = 0; rIdx < hRegions.length; rIdx++) {
+                const rPoints = hRegions[rIdx];
+                if (!rPoints || rPoints.length === 0) continue;
+
+                const isActive = (rIdx === (typeof currentHatchRegionIndex !== 'undefined' ? currentHatchRegionIndex : 0));
+
+                ctx.strokeStyle = isActive ? "rgba(100, 200, 100, 0.4)" : "rgba(100, 200, 100, 0.8)";
+
+                for (let i = 0; i < rPoints.length; i++) {
+                    if (i > 0) {
+                        const prevCanvas = v2disposSight2v2canvas(rPoints[i - 1]);
+                        const pointCanvas = v2disposSight2v2canvas(rPoints[i]);
+                        drawLine(prevCanvas.x, prevCanvas.y, pointCanvas.x, pointCanvas.y);
+                    }
+                }
+
+                if (rPoints.length >= 3) {
+                    const firstCanvas = v2disposSight2v2canvas(rPoints[0]);
+                    const lastCanvas = v2disposSight2v2canvas(rPoints[rPoints.length - 1]);
+                    drawLine(lastCanvas.x, lastCanvas.y, firstCanvas.x, firstCanvas.y);
+                }
+
+                if (isActive) {
+                    let pointRadius = (window.innerWidth <= 950 || ('ontouchstart' in window)) ? 12 : 6;
+                    for (let i = 0; i < rPoints.length; i++) {
+                        const pointCanvas = v2disposSight2v2canvas(rPoints[i]);
+                        const isBeingDragged = (typeof hatchVertexDragIndex !== 'undefined' && hatchVertexDragIndex === i);
+                        drawCircle(pointCanvas.x, pointCanvas.y, isBeingDragged ? pointRadius * 1.6 : pointRadius);
+                    }
+                }
+            }
+
+            if (typeof previewHatchLines !== 'undefined' && previewHatchLines && previewHatchLines.length > 0) {
+                ctx.save();
+                ctx.globalAlpha = 0.6;
+                ctx.strokeStyle = "rgba(100, 200, 100, 0.8)";
+                ctx.fillStyle = "rgba(100, 200, 100, 0.4)";
+                ctx.lineWidth = getLineWidth(2);
+
+                for (const item of previewHatchLines) {
+                    if (item.type === 'line' || !item.type) {
+                        const from = v2disposSight2v2canvas(item.start);
+                        const to = v2disposSight2v2canvas(item.end);
+                        ctx.beginPath();
+                        ctx.moveTo(from.x, from.y);
+                        ctx.lineTo(to.x, to.y);
+                        ctx.stroke();
+                    } else if (item.type === 'quad') {
+                        const p1 = v2disposSight2v2canvas(item.pos1);
+                        const p2 = v2disposSight2v2canvas(item.pos2);
+                        const p3 = v2disposSight2v2canvas(item.pos3);
+                        const p4 = v2disposSight2v2canvas(item.pos4);
+                        ctx.beginPath();
+                        ctx.moveTo(p1.x, p1.y);
+                        ctx.lineTo(p2.x, p2.y);
+                        ctx.lineTo(p3.x, p3.y);
+                        ctx.lineTo(p4.x, p4.y);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                }
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+
+            if (snapping) {
+                drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+            }
+            break;
+        case "curve":
+            if (isDrawingCurve && curvePoints.length > 0) {
+                ctx.beginPath();
+                const startCanvas = v2disposSight2v2canvas(curvePoints[0]);
+                ctx.moveTo(startCanvas.x, startCanvas.y);
+
+                let limit = snapping ? curvePoints.length - 1 : curvePoints.length;
+
+                for (let i = 1; i < limit; i++) {
+                    const ptCanvas = v2disposSight2v2canvas(curvePoints[i]);
+                    ctx.lineTo(ptCanvas.x, ptCanvas.y);
+                }
+                if (snapping) {
+                    let snapP = snappingPos(mousePos);
+                    let targetPos = snapP != null ? snapP : mousePos;
+                    const targetCanvas = v2disposSight2v2canvas(targetPos);
+                    ctx.lineTo(targetCanvas.x, targetCanvas.y);
+                }
+
+                ctx.strokeStyle = el("outlineCheckBox").checked ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.5)";
+                ctx.lineWidth = getLineWidth(1);
+                ctx.stroke();
+            }
+            if (snapping) {
+                drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+            }
+            break;
+        case "text":
+            if (textToolState.active) {
+                const rectCanvas = {
+                    tl: v2disposSight2v2canvas({ x: textToolState.rect.x, y: textToolState.rect.y }),
+                    br: v2disposSight2v2canvas({ x: textToolState.rect.x + textToolState.rect.w, y: textToolState.rect.y + textToolState.rect.h }),
+                    tr: v2disposSight2v2canvas({ x: textToolState.rect.x + textToolState.rect.w, y: textToolState.rect.y }),
+                    bl: v2disposSight2v2canvas({ x: textToolState.rect.x, y: textToolState.rect.y + textToolState.rect.h })
+                };
+
+                ctx.save();
+                ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+                ctx.lineWidth = getLineWidth(1);
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(rectCanvas.tl.x, rectCanvas.tl.y, rectCanvas.br.x - rectCanvas.tl.x, rectCanvas.br.y - rectCanvas.tl.y);
+                ctx.setLineDash([]);
+
+                ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+                drawCircle(rectCanvas.tl.x, rectCanvas.tl.y, 8);
+                drawCircle(rectCanvas.tr.x, rectCanvas.tr.y, 8);
+                drawCircle(rectCanvas.bl.x, rectCanvas.bl.y, 8);
+                drawCircle(rectCanvas.br.x, rectCanvas.br.y, 8);
+
+                ctx.strokeStyle = el("outlineCheckBox").checked ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.8)";
+                ctx.lineWidth = getLineWidth(1);
+
+                const isFilled = document.getElementById('textFillCheckbox') && document.getElementById('textFillCheckbox').checked;
+
+                if (isFilled && typeof previewTextQuads !== 'undefined' && previewTextQuads.length > 0) {
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+                    for (const q of previewTextQuads) {
+                        const p1 = v2disposSight2v2canvas(q[0]), p2 = v2disposSight2v2canvas(q[1]);
+                        const p3 = v2disposSight2v2canvas(q[2]), p4 = v2disposSight2v2canvas(q[3]);
+                        ctx.beginPath();
+                        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+                        ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                } else {
+                    previewTextLines.forEach(line => {
+                        const from = v2disposSight2v2canvas(line.start);
+                        const to = v2disposSight2v2canvas(line.end);
+                        drawLine(from.x, from.y, to.x, to.y);
+                    });
+                }
+
+                ctx.restore();
+            }
+            break;
+        case "brush":
+            let brushThicknessInput = el("brushThicknessInput");
+            let brushThicknessVal = brushThicknessInput ? parseFloat(brushThicknessInput.value) : 10;
+            let brushRadiusSight = (brushThicknessVal * 0.001) / 2;
+            let brushRadiusPixel = sight2pixel(brushRadiusSight);
+
+            if (isDrawingBrush && brushPoints.length > 0) {
+                ctx.beginPath();
+                const startCanvas = v2disposSight2v2canvas(brushPoints[0]);
+                ctx.moveTo(startCanvas.x, startCanvas.y);
+
+                let limit = snapping ? brushPoints.length - 1 : brushPoints.length;
+
+                for (let i = 1; i < limit; i++) {
+                    const ptCanvas = v2disposSight2v2canvas(brushPoints[i]);
+                    ctx.lineTo(ptCanvas.x, ptCanvas.y);
+                }
+                if (snapping) {
+                    let snapP = snappingPos(mousePos);
+                    let targetPos = snapP != null ? snapP : mousePos;
+                    const targetCanvas = v2disposSight2v2canvas(targetPos);
+                    ctx.lineTo(targetCanvas.x, targetCanvas.y);
+                }
+
+                ctx.strokeStyle = el("outlineCheckBox").checked ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.5)";
+                ctx.lineWidth = brushRadiusPixel * 2;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                ctx.stroke();
+
+                ctx.lineCap = "butt";
+                ctx.lineJoin = "miter";
+                ctx.lineWidth = getLineWidth(1);
+            }
+
+            if (!isDrawingBrush) {
+                ctx.beginPath();
+                ctx.arc(mousePosCanvas.x, mousePosCanvas.y, brushRadiusPixel, 0, 2 * Math.PI, false);
+                ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+                ctx.lineWidth = getLineWidth(1);
+                ctx.stroke();
+            }
+
+            if (snapping) {
+                drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+            }
+            break;
+        case "fill":
+            let fRegions = (typeof isFillMultiRegionMode !== 'undefined' && isFillMultiRegionMode) ? fillRegions : [fillPoints];
+            if (!fRegions) fRegions = [];
+
+            for (let rIdx = 0; rIdx < fRegions.length; rIdx++) {
+                const rPoints = fRegions[rIdx];
+                if (!rPoints || rPoints.length === 0) continue;
+
+                const isActive = (rIdx === (typeof currentFillRegionIndex !== 'undefined' ? currentFillRegionIndex : 0));
+
+                ctx.strokeStyle = isActive ? "rgba(100, 150, 255, 0.4)" : "rgba(100, 150, 255, 0.8)";
+
+                for (let i = 0; i < rPoints.length; i++) {
+                    if (i > 0) {
+                        const prevCanvas = v2disposSight2v2canvas(rPoints[i - 1]);
+                        const pointCanvas = v2disposSight2v2canvas(rPoints[i]);
+                        drawLine(prevCanvas.x, prevCanvas.y, pointCanvas.x, pointCanvas.y);
+                    }
+                }
+
+                if (rPoints.length >= 3) {
+                    const firstCanvas = v2disposSight2v2canvas(rPoints[0]);
+                    const lastCanvas = v2disposSight2v2canvas(rPoints[rPoints.length - 1]);
+                    drawLine(lastCanvas.x, lastCanvas.y, firstCanvas.x, firstCanvas.y);
+                }
+
+                if (isActive) {
+                    let pointRadius = (window.innerWidth <= 950 || ('ontouchstart' in window)) ? 12 : 6;
+                    for (let i = 0; i < rPoints.length; i++) {
+                        const pointCanvas = v2disposSight2v2canvas(rPoints[i]);
+                        const isBeingDragged = (typeof fillVertexDragIndex !== 'undefined' && fillVertexDragIndex === i);
+                        drawCircle(pointCanvas.x, pointCanvas.y, isBeingDragged ? pointRadius * 1.6 : pointRadius);
+                    }
+                }
+            }
+
+            if (previewFillQuads && previewFillQuads.length > 0) {
+                ctx.save();
+
+                const fillOpInput = document.getElementById("fillOpacityInput");
+                const fillOp = fillOpInput ? parseFloat(fillOpInput.value) : 0.4;
+
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = `rgba(100, 150, 255, ${fillOp})`;
+                ctx.strokeStyle = `rgba(100, 150, 255, ${Math.min(1, fillOp * 2)})`;
+                for (const q of previewFillQuads) {
+                    const p1 = v2disposSight2v2canvas(q[0]), p2 = v2disposSight2v2canvas(q[1]);
+                    const p3 = v2disposSight2v2canvas(q[2]), p4 = v2disposSight2v2canvas(q[3]);
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+                    ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y);
+                    ctx.closePath();
+                    ctx.fill(); ctx.stroke();
+                }
+                ctx.restore();
+            }
+            if (snapping) drawCircle(mousePosCanvas.x, mousePosCanvas.y, 20);
+            break;
+        case "shapes":
+            if (freeShapeState.active && freeShapeState.points.length > 0) {
+                ctx.save();
+                ctx.strokeStyle = el("outlineCheckBox").checked ? "rgba(255,255,255,0.8)" : "rgba(80, 130, 255, 0.9)";
+                ctx.lineWidth = getLineWidth(1.5);
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+
+                ctx.beginPath();
+                const startCanvas = v2disposSight2v2canvas(freeShapeState.points[0]);
+                ctx.moveTo(startCanvas.x, startCanvas.y);
+                for (let i = 1; i < freeShapeState.points.length; i++) {
+                    const ptCanvas = v2disposSight2v2canvas(freeShapeState.points[i]);
+                    ctx.lineTo(ptCanvas.x, ptCanvas.y);
+                }
+                ctx.stroke();
+
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                const lastCanvas = v2disposSight2v2canvas(freeShapeState.points[freeShapeState.points.length - 1]);
+                ctx.moveTo(lastCanvas.x, lastCanvas.y);
+                ctx.lineTo(mousePosCanvas.x, mousePosCanvas.y);
+                ctx.lineTo(startCanvas.x, startCanvas.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.lineCap = "butt";
+                ctx.lineJoin = "miter";
+                ctx.restore();
+            }
+            if (shapesToolState.active && shapesToolState.box) {
+                const box = shapesToolState.box;
+
+                ctx.save();
+                ctx.strokeStyle = el("outlineCheckBox").checked ? "rgba(124, 124, 124, 0.8)" : "rgba(0,0,0,0.8)";
+                ctx.lineWidth = getLineWidth(1);
+                previewShapeLines.forEach(line => {
+                    const from = v2disposSight2v2canvas(line.start);
+                    const to = v2disposSight2v2canvas(line.end);
+                    drawLine(from.x, from.y, to.x, to.y);
+                });
+                ctx.restore();
+                ctx.save();
+                ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+                ctx.fillStyle = "rgba(255, 255, 255, 1)";
+                ctx.lineWidth = getLineWidth(2);
+
+                const cos = Math.cos(box.angle), sin = Math.sin(box.angle);
+                const corners = [
+                    { x: -box.w / 2, y: -box.h / 2 }, { x: box.w / 2, y: -box.h / 2 },
+                    { x: box.w / 2, y: box.h / 2 }, { x: -box.w / 2, y: box.h / 2 }
+                ].map(pt => v2disposSight2v2canvas({
+                    x: box.cx + pt.x * cos - pt.y * sin,
+                    y: box.cy + pt.x * sin + pt.y * cos
+                }));
+
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(corners[0].x, corners[0].y);
+                corners.forEach(c => ctx.lineTo(c.x, c.y));
+                ctx.closePath();
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const handles = getShapesTransformHandles(box);
+                const tHandle = handles.find(h => h.id === 'scale_t').p;
+                const rotHandle = handles.find(h => h.id === 'rotate').p;
+
+                const tScreen = v2disposSight2v2canvas(tHandle);
+                const rotScreen = v2disposSight2v2canvas(rotHandle);
+                ctx.beginPath();
+                ctx.moveTo(tScreen.x, tScreen.y);
+                ctx.lineTo(rotScreen.x, rotScreen.y);
+                ctx.stroke();
+
+                handles.forEach(h => {
+                    const canvasPos = v2disposSight2v2canvas(h.p);
+                    ctx.beginPath();
+                    ctx.arc(canvasPos.x, canvasPos.y, h.id === 'rotate' ? getLineWidth(12) : getLineWidth(8), 0, Math.PI * 2);
+                    ctx.fill(); ctx.stroke();
+                });
+
+                ctx.restore();
+            }
+            break;
+    }
+    if (typeof currentActiveTabId !== 'undefined' && currentActiveTabId === 'reference' && typeof isRefFreeMove !== 'undefined' && isRefFreeMove) {
+        const box = typeof getRefTransformBox === 'function' ? getRefTransformBox() : null;
+        if (box) {
+            ctx.save();
+            ctx.lineWidth = getLineWidth(2);
+
+            const cos = Math.cos(box.angle), sin = Math.sin(box.angle);
+            const corners = [
+                { x: -box.w / 2, y: -box.h / 2 }, { x: box.w / 2, y: -box.h / 2 },
+                { x: box.w / 2, y: box.h / 2 }, { x: -box.w / 2, y: box.h / 2 }
+            ].map(pt => v2disposSight2v2canvas({
+                x: box.cx + pt.x * cos - pt.y * sin,
+                y: box.cy + pt.x * sin + pt.y * cos
+            }));
+
+            ctx.beginPath();
+            ctx.moveTo(corners[0].x, corners[0].y);
+            corners.forEach(c => ctx.lineTo(c.x, c.y));
+            ctx.closePath();
+
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+            ctx.lineDashOffset = 5;
+            ctx.stroke();
+
+            ctx.setLineDash([]);
+            ctx.lineDashOffset = 0;
+
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+            ctx.fillStyle = "rgba(255, 255, 255, 1)";
+            const handles = getTransformHandles(box);
+            const tHandle = handles.find(h => h.id === 'scale_t').p;
+            const rotHandle = handles.find(h => h.id === 'rotate').p;
+
+            const tScreen = v2disposSight2v2canvas(tHandle);
+            const rotScreen = v2disposSight2v2canvas(rotHandle);
+            ctx.beginPath();
+            ctx.moveTo(tScreen.x, tScreen.y);
+            ctx.lineTo(rotScreen.x, rotScreen.y);
+            ctx.stroke();
+
+            handles.forEach(h => {
+                const canvasPos = v2disposSight2v2canvas(h.p);
+                ctx.beginPath();
+                ctx.arc(canvasPos.x, canvasPos.y, h.id === 'rotate' ? getLineWidth(12) : getLineWidth(8), 0, Math.PI * 2);
+                ctx.fill(); ctx.stroke();
+            });
+
+            ctx.restore();
+        }
+    }
+    if (tool === "select" && isSelecting) {
+        if (selectionShapeMode === 'rect' && selectionRect) {
+            const from = v2disposSight2v2canvas({ x: selectionRect.startX, y: selectionRect.startY });
+            const to = v2disposSight2v2canvas({ x: selectionRect.endX, y: selectionRect.endY });
+
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = "rgba(0, 59, 185, 0.3)";
+            ctx.fillRect(from.x, from.y, to.x - from.x, to.y - from.y);
+            ctx.strokeStyle = "rgba(149, 183, 255, 0.8)";
+            ctx.lineWidth = getLineWidth(2);
+            ctx.strokeRect(from.x, from.y, to.x - from.x, to.y - from.y);
+            ctx.restore();
+        }
+        else if (selectionShapeMode === 'lasso' && lassoPoints.length > 0) {
+            ctx.save();
+            ctx.beginPath();
+            const startCanvas = v2disposSight2v2canvas(lassoPoints[0]);
+            ctx.moveTo(startCanvas.x, startCanvas.y);
+
+            for (let i = 1; i < lassoPoints.length; i++) {
+                const pt = v2disposSight2v2canvas(lassoPoints[i]);
+                ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.closePath();
+
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = "rgba(0, 59, 185, 0.3)";
+            ctx.fill("evenodd");
+            ctx.strokeStyle = "rgba(149, 183, 255, 0.8)";
+            ctx.lineWidth = getLineWidth(2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+    if (tool === "select" && selectedObjectsSet.size > 0 && !selectionRect) {
+        const currentHash = Array.from(selectedObjectsSet).sort().join(',');
+
+        if (!transformState.box || transformState.selectedIdsHash !== currentHash) {
+            if (!transformState.active && !isDraggingSelected) updateTransformBoxFromSelection();
+        }
+
+        const box = transformState.box;
+        if (box) {
+            ctx.save();
+            ctx.strokeStyle = "rgba(0, 120, 215, 0.8)";
+            ctx.fillStyle = "rgba(255, 255, 255, 1)";
+            ctx.lineWidth = getLineWidth(1.5);
+
+            const cos = Math.cos(box.angle), sin = Math.sin(box.angle);
+
+            const corners = [
+                { x: -box.w / 2, y: -box.h / 2 }, { x: box.w / 2, y: -box.h / 2 },
+                { x: box.w / 2, y: box.h / 2 }, { x: -box.w / 2, y: box.h / 2 }
+            ].map(pt => v2disposSight2v2canvas({
+                x: box.cx + pt.x * cos - pt.y * sin,
+                y: box.cy + pt.x * sin + pt.y * cos
+            }));
+
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(corners[0].x, corners[0].y);
+            corners.forEach(c => ctx.lineTo(c.x, c.y));
+            ctx.closePath();
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const handles = getTransformHandles(box);
+            const tHandle = handles.find(h => h.id === 'scale_t').p;
+            const rotHandle = handles.find(h => h.id === 'rotate').p;
+
+            const tScreen = v2disposSight2v2canvas(tHandle);
+            const rotScreen = v2disposSight2v2canvas(rotHandle);
+            ctx.beginPath();
+            ctx.moveTo(tScreen.x, tScreen.y);
+            ctx.lineTo(rotScreen.x, rotScreen.y);
+            ctx.stroke();
+
+            function drawCircleHandle(worldPos, radiusPx) {
+                const canvasPos = v2disposSight2v2canvas(worldPos);
+                ctx.beginPath();
+                ctx.arc(canvasPos.x, canvasPos.y, radiusPx, 0, Math.PI * 2);
+                ctx.fill(); ctx.stroke();
+            }
+
+            const normalRadius = getLineWidth(8);
+            const rotateRadius = getLineWidth(12);
+
+            handles.forEach(h => {
+                drawCircleHandle(h.p, h.id === 'rotate' ? rotateRadius : normalRadius);
+            });
+
+            ctx.restore();
+        }
+    } else if (selectedObjectsSet.size === 0) {
+        transformState.box = null;
+    }
+
+}
+
+function drawReference(index) {
+    const ref = referenceArray[index];
+
+    if (ref.obj == null) return;
+
+    const refAspectRatio = ref.obj.width / ref.obj.height;
+
+    const centerX = ref.x;
+    const centerY = ref.y;
+    const halfWidth = (ref.size / 2) * refAspectRatio;
+    const halfHeight = ref.size / 2;
+
+    const centerCanvas = v2disposSight2v2canvas({ x: centerX, y: centerY });
+
+    ctx.save();
+    ctx.translate(centerCanvas.x, centerCanvas.y);
+    ctx.rotate(ref.rotation * Math.PI / 180);
+
+    ctx.globalAlpha = ref.opacity;
+
+    try {
+        const pixelWidth = (halfWidth * 2) * screenZoom * getBaseScale();
+        const pixelHeight = (halfHeight * 2) * screenZoom * getBaseScale();
+
+        ctx.drawImage(ref.obj, -pixelWidth / 2, -pixelHeight / 2, pixelWidth, pixelHeight);
+    }
+    catch (e) {
+        ref.obj = null;
+        alert(lang === ru ? "Картинка не найдена/не подходит!" : "Image not found/not applicable!");
+    }
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+}
+
+function getArrowSources(object) {
+    const arrowSources = [];
+
+    switch (object.type) {
+        case "line":
+            arrowSources.push(v2disposSight2v2canvas(object.start));
+            arrowSources.push(v2disposSight2v2canvas(object.end));
+
+            break;
+
+        case "quad":
+            arrowSources.push(v2disposSight2v2canvas(object.pos1));
+            arrowSources.push(v2disposSight2v2canvas(object.pos2));
+            arrowSources.push(v2disposSight2v2canvas(object.pos3));
+            arrowSources.push(v2disposSight2v2canvas(object.pos4));
+
+            break;
+    }
+
+    return arrowSources;
+}
+
+let hoveredArrowHitbox = null;
+
+function drawArrows() {
+    if (selectedId == null) return;
+    const object = objects.get(selectedId);
+    if (!object) return;
+
+    ctx.globalAlpha = 0.5;
+
+    const arrowSources = getArrowSources(object);
+    const arrowHitboxes = getArrowHitboxes();
+
+    hoveredArrowHitbox = null;
+
+    for (let i = 0; i < arrowHitboxes.length; i++) {
+        const hitbox = arrowHitboxes[i];
+        if (hitbox.type === 'rect') {
+            if (mousePosWindow.x > hitbox.x1 && mousePosWindow.y > hitbox.y1 &&
+                mousePosWindow.x < hitbox.x2 && mousePosWindow.y < hitbox.y2) {
+                hoveredArrowHitbox = i;
+            }
+        } else if (hitbox.type === 'circle') {
+            const dist = Math.hypot(mousePosWindow.x - hitbox.x, mousePosWindow.y - hitbox.y);
+            if (dist <= hitbox.r) {
+                hoveredArrowHitbox = i;
+            }
+        }
+    }
+
+    let hoveredSource = null;
+    let hoveredAxis = null;
+
+    if (hoveredArrowHitbox != null) {
+        hoveredSource = Math.floor(hoveredArrowHitbox / 3);
+        hoveredAxis = hoveredArrowHitbox % 3;
+    }
+
+    let mobileMult = (window.innerWidth <= 950 || ('ontouchstart' in window)) ? 2 : 1;
+
+    for (let i = 0; i < arrowSources.length; i++) {
+        const pos = arrowSources[i];
+
+        ctx.lineWidth = getLineWidth(5 * mobileMult);
+        const size100 = getLineWidth(100 * mobileMult);
+        const size80 = getLineWidth(80 * mobileMult);
+        const size10 = getLineWidth(10 * mobileMult);
+        const size15 = getLineWidth(15 * mobileMult);
+
+        // Центральный кружок
+        ctx.fillStyle = (hoveredSource === i && hoveredAxis === 2) ? "rgba(0, 0, 0, 0.8)" : "rgba(0, 0, 0, 0.4)";
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size15, 0, Math.PI * 2);
+        ctx.fill();
+
+        // X
+        ctx.strokeStyle = (hoveredSource === i && hoveredAxis === 0) ? "rgb(128, 0, 0, 1)" : "rgb(255, 0, 0, 1)";
+        ctx.beginPath();
+        ctx.moveTo(pos.x + size15, pos.y)
+        ctx.lineTo(pos.x + size100, pos.y);
+        ctx.moveTo(pos.x + size80, pos.y - size10);
+        ctx.lineTo(pos.x + size100, pos.y);
+        ctx.lineTo(pos.x + size80, pos.y + size10);
+        ctx.stroke();
+
+        // Y
+        ctx.strokeStyle = (hoveredSource === i && hoveredAxis === 1) ? "rgb(0, 128, 0, 1)" : "rgb(0, 255, 0, 1)";
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y - size15);
+        ctx.lineTo(pos.x, pos.y - size100);
+        ctx.moveTo(pos.x - size10, pos.y - size80);
+        ctx.lineTo(pos.x, pos.y - size100);
+        ctx.lineTo(pos.x + size10, pos.y - size80);
+        ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+}
+
+function getArrowHitboxes() {
+    if (selectedId == null) return [];
+    const object = objects.get(selectedId);
+    if (!object) return [];
+    const arrowSources = getArrowSources(object);
+    const arrowHitboxes = [];
+
+    const isTouch = ('ontouchstart' in window);
+
+    const hitboxSize = isTouch ? 45 : 10;
+
+    let size100 = getLineWidth(100);
+    if (isTouch) {
+        size100 *= 1.4;
+    }
+
+    for (const src of arrowSources) {
+        arrowHitboxes.push({
+            type: 'rect',
+            x1: src.x - hitboxSize,
+            y1: src.y - hitboxSize,
+            x2: src.x + size100 + hitboxSize,
+            y2: src.y + hitboxSize
+        });
+        arrowHitboxes.push({
+            type: 'rect',
+            x1: src.x - hitboxSize,
+            y1: src.y - size100 - hitboxSize,
+            x2: src.x + hitboxSize,
+            y2: src.y + hitboxSize
+        });
+        arrowHitboxes.push({
+            type: 'circle',
+            x: src.x,
+            y: src.y,
+            r: getLineWidth(15) + hitboxSize
+        });
+    }
+    return arrowHitboxes;
+}
+
+function isLineIntersectsRect(lineStart, lineEnd, rectMinX, rectMinY, rectMaxX, rectMaxY) {
+    const startInside = (lineStart.x >= rectMinX && lineStart.x <= rectMaxX &&
+        lineStart.y >= rectMinY && lineStart.y <= rectMaxY);
+    const endInside = (lineEnd.x >= rectMinX && lineEnd.x <= rectMaxX &&
+        lineEnd.y >= rectMinY && lineEnd.y <= rectMaxY);
+
+    if (startInside || endInside) return true;
+
+    const p1 = lineStart, p2 = lineEnd;
+
+    if ((p1.x - rectMinX) * (p2.x - rectMinX) < 0) {
+        const t = (rectMinX - p1.x) / (p2.x - p1.x);
+        const y = p1.y + (p2.y - p1.y) * t;
+        if (y >= rectMinY && y <= rectMaxY) return true;
+    }
+    if ((p1.x - rectMaxX) * (p2.x - rectMaxX) < 0) {
+        const t = (rectMaxX - p1.x) / (p2.x - p1.x);
+        const y = p1.y + (p2.y - p1.y) * t;
+        if (y >= rectMinY && y <= rectMaxY) return true;
+    }
+    if ((p1.y - rectMinY) * (p2.y - rectMinY) < 0) {
+        const t = (rectMinY - p1.y) / (p2.y - p1.y);
+        const x = p1.x + (p2.x - p1.x) * t;
+        if (x >= rectMinX && x <= rectMaxX) return true;
+    }
+    if ((p1.y - rectMaxY) * (p2.y - rectMaxY) < 0) {
+        const t = (rectMaxY - p1.y) / (p2.y - p1.y);
+        const x = p1.x + (p2.x - p1.x) * t;
+        if (x >= rectMinX && x <= rectMaxX) return true;
+    }
+
+    return false;
+}
+
+function isQuadIntersectsRect(quad, rectMinX, rectMinY, rectMaxX, rectMaxY) {
+    const points = [quad.pos1, quad.pos2, quad.pos3, quad.pos4];
+
+    for (const p of points) {
+        if (p.x >= rectMinX && p.x <= rectMaxX && p.y >= rectMinY && p.y <= rectMaxY) {
+            return true;
+        }
+    }
+
+    const edges = [
+        [quad.pos1, quad.pos2], [quad.pos2, quad.pos3],
+        [quad.pos3, quad.pos4], [quad.pos4, quad.pos1]
+    ];
+
+    for (const [p1, p2] of edges) {
+        if (isLineIntersectsRect(p1, p2, rectMinX, rectMinY, rectMaxX, rectMaxY)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isPointInPolygon(point, polygon) {
+    let x = point.x, y = point.y;
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        let xi = polygon[i].x, yi = polygon[i].y;
+        let xj = polygon[j].x, yj = polygon[j].y;
+        let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function doLineSegmentsIntersect(p1, p2, p3, p4) {
+    const ccw = (A, B, C) => (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+    return (ccw(p1, p3, p4) !== ccw(p2, p3, p4)) && (ccw(p1, p2, p3) !== ccw(p1, p2, p4));
+}
+
+function isLineIntersectingPolygon(lineStart, lineEnd, polygon) {
+    if (isPointInPolygon(lineStart, polygon) || isPointInPolygon(lineEnd, polygon)) return true;
+    for (let i = 0; i < polygon.length; i++) {
+        let next = (i + 1) % polygon.length;
+        if (doLineSegmentsIntersect(lineStart, lineEnd, polygon[i], polygon[next])) return true;
+    }
+    return false;
+}
+
+function isQuadIntersectingPolygon(quad, polygon) {
+    const points = [quad.pos1, quad.pos2, quad.pos3, quad.pos4];
+    for (let p of points) {
+        if (isPointInPolygon(p, polygon)) return true;
+    }
+    const edges = [[points[0], points[1]], [points[1], points[2]], [points[2], points[3]], [points[3], points[0]]];
+    for (let edge of edges) {
+        if (isLineIntersectingPolygon(edge[0], edge[1], polygon)) return true;
+    }
+    if (polygon.length > 0 && isPointInQuad(polygon[0], quad)) return true;
+    return false;
+}
+
+function updateSelectionFromLasso() {
+    if (lassoPoints.length < 3) return;
+
+    selectedObjectsSet.clear();
+
+    for (const [id, obj] of objects) {
+        let intersects = false;
+
+        if (obj.type === "line" && (selectionFilterMode === 'all' || selectionFilterMode === 'lines')) {
+            intersects = isLineIntersectingPolygon(obj.start, obj.end, lassoPoints);
+        } else if (obj.type === "quad" && (selectionFilterMode === 'all' || selectionFilterMode === 'quads')) {
+            intersects = isQuadIntersectingPolygon(obj, lassoPoints);
+        }
+
+        if (intersects) {
+            selectedObjectsSet.add(id);
+            obj.selected = true;
+        } else {
+            obj.selected = false;
+        }
+    }
+    updateSelectionInfo();
+    if (typeof refreshObjectsList === 'function') refreshObjectsList();
+}
+
+function updateSelectionFromRect() {
+    if (!selectionRect) return;
+
+    const minX = Math.min(selectionRect.startX, selectionRect.endX);
+    const maxX = Math.max(selectionRect.startX, selectionRect.endX);
+    const minY = Math.min(selectionRect.startY, selectionRect.endY);
+    const maxY = Math.max(selectionRect.startY, selectionRect.endY);
+
+    selectedObjectsSet.clear();
+
+    for (const [id, obj] of objects) {
+        let intersects = false;
+
+        if (obj.type === "line" && (selectionFilterMode === 'all' || selectionFilterMode === 'lines')) {
+            intersects = isLineIntersectsRect(obj.start, obj.end, minX, minY, maxX, maxY);
+        } else if (obj.type === "quad" && (selectionFilterMode === 'all' || selectionFilterMode === 'quads')) {
+            intersects = isQuadIntersectsRect(obj, minX, minY, maxX, maxY);
+        }
+
+        if (intersects) {
+            selectedObjectsSet.add(id);
+            obj.selected = true;
+        } else {
+            obj.selected = false;
+        }
+    }
+
+    updateSelectionInfo();
+    if (typeof refreshObjectsList === 'function') refreshObjectsList();
+}
+
+let selectionFilterMode = 'all';
+
+function setSelectionMode(mode) {
+    selectionFilterMode = mode;
+
+    const btnAll = document.getElementById('selModeAll');
+    const btnLines = document.getElementById('selModeLines');
+    const btnQuads = document.getElementById('selModeQuads');
+
+    [btnAll, btnLines, btnQuads].forEach(btn => {
+        btn.style.background = 'transparent';
+        btn.style.color = 'inherit';
+        btn.style.border = '1px solid var(--border-col)';
+
+        btn.onmouseover = () => {
+            if (selectionFilterMode !== btn.id.replace('selMode', '').toLowerCase()) {
+                btn.style.background = 'rgba(128, 128, 128, 0.3)';
+            }
+        };
+        btn.onmouseout = () => {
+            if (selectionFilterMode !== btn.id.replace('selMode', '').toLowerCase()) {
+                btn.style.background = 'transparent';
+            }
+        };
+    });
+
+    let activeBtn;
+    if (mode === 'all') activeBtn = btnAll;
+    else if (mode === 'lines') activeBtn = btnLines;
+    else if (mode === 'quads') activeBtn = btnQuads;
+
+    if (activeBtn) {
+        activeBtn.style.background = 'var(--input-bg)';
+        activeBtn.style.color = 'var(--text-white)';
+        activeBtn.onmouseover = null;
+        activeBtn.onmouseout = null;
+    }
+
+    updateSelectionFromRect();
+}
+setSelectionMode('all');
+
+function setSelectionShape(shape) {
+    selectionShapeMode = shape;
+
+    const btnRect = document.getElementById('selShapeRect');
+    const btnLasso = document.getElementById('selShapeLasso');
+
+    [btnRect, btnLasso].forEach(btn => {
+        if (!btn) return;
+        btn.style.background = 'transparent';
+        btn.style.color = 'inherit';
+        btn.style.border = '1px solid var(--border-col)';
+    });
+
+    let activeBtn = shape === 'rect' ? btnRect : btnLasso;
+    if (activeBtn) {
+        activeBtn.style.background = 'var(--input-bg)';
+        activeBtn.style.color = 'var(--text-white)';
+    }
+
+    clearSelection();
+    updateSelectionInfo();
+}
+setSelectionShape('rect');
+
+function clearSelection() {
+    for (const [id, obj] of objects) {
+        obj.selected = false;
+    }
+
+    selectedObjectsSet.clear();
+    selectionRect = null;
+    lassoPoints = [];
+    isSelecting = false;
+
+    if (typeof transformState !== 'undefined') {
+        transformState.box = null;
+        transformState.active = false;
+        transformState.action = null;
+        transformState.selectedIdsHash = "";
+    }
+
+    if (selectedId !== null) {
+        selectedId = null;
+        showInfo(null);
+    }
+    updateSelectionInfo();
+    if (typeof refreshObjectsList === 'function') refreshObjectsList();
+}
+
+function selectObjectsByIds(ids) {
+    if (selectedId !== null && objects.has(selectedId)) {
+        objects.get(selectedId).selected = false;
+    }
+    selectedId = null;
+
+    for (const [id, obj] of objects) {
+        obj.selected = false;
+    }
+
+    selectedObjectsSet.clear();
+    selectionRect = null;
+    lassoPoints = [];
+    isSelecting = false;
+
+    const uniqueIds = Array.from(new Set(ids)).filter(id => objects.has(id));
+
+    if (uniqueIds.length === 1) {
+        refreshObjectsList();
+        showInfo(uniqueIds[0]);
+        return;
+    }
+
+    for (const id of uniqueIds) {
+        const obj = objects.get(id);
+        obj.selected = true;
+        selectedObjectsSet.add(id);
+    }
+
+    if (typeof updateTransformBoxFromSelection === 'function') {
+        updateTransformBoxFromSelection();
+    }
+
+    updateSelectionInfo();
+    refreshObjectsList();
+}
+
+function updateSelectionInfo() {
+    const count = selectedObjectsSet.size;
+    const infoMenu = el("infoMenu");
+    const title = el("selObjectTitle");
+    const table = el("infoTable");
+    const deleteBtn = el("infoDeleteButton");
+
+    if (count > 0) {
+        show(infoMenu);
+        title.textContent = `${lang.selectedObjectsCount}: ${count}`;
+        table.innerHTML = `
+            <tr>
+                <td colspan="2" style="text-align: center; padding: 4px;">
+                    <span style="font-size: 11px; color: #777777;">${lang.selectedObjectsHint}</span>
+                </td>
+            </tr>
+        `;
+        show(deleteBtn);
+        deleteBtn.textContent = `${lang.deleteAllButton} ${count}`;
+        deleteBtn.onclick = () => {
+            deleteSelectedObjects();
+        };
+    } else if (selectedId !== null) {
+        const obj = objects.get(selectedId);
+        if (obj) {
+            showInfo(selectedId);
+        } else {
+            hide(infoMenu);
+            title.innerHTML = lang.selObjectTitle;
+            table.innerHTML = "";
+            hide(deleteBtn);
+        }
+    } else {
+        hide(infoMenu);
+        title.innerHTML = lang.selObjectTitle;
+        table.innerHTML = "";
+        hide(deleteBtn);
+    }
+}
+
+
+function deleteSelectedObjects() {
+    const idsToDelete = Array.from(selectedObjectsSet);
+
+    if (idsToDelete.length === 0) return;
+
+    let deletedObjects = [];
+
+    for (const id of idsToDelete) {
+        const obj = objects.get(id);
+        if (obj) {
+            deletedObjects.push({ id: id, object: obj });
+            objects.delete(id);
+        }
+    }
+
+    if (deletedObjects.length > 0) {
+        pushEvent("delete_multiple", deletedObjects);
+    }
+
+    selectedObjectsSet.clear();
+    selectionRect = null;
+    selectedId = null;
+
+    refreshObjectsList();
+    updateSelectionInfo();
+    showInfo(null);
+}
+
+function deleteCurrentSelection() {
+    if (selectedObjectsSet.size > 0) {
+        deleteSelectedObjects();
+        return;
+    }
+
+    if (selectedId !== null) {
+        const obj = objects.get(selectedId);
+        if (obj) {
+            pushEvent("delete", { id: selectedId, object: obj });
+            deleteObject(selectedId);
+            refreshObjectsList();
+        }
+    }
+}
+
+function distanceToLine(point, lineStart, lineEnd) {
+    const dx = lineEnd.x - lineStart.x;
+    const dy = lineEnd.y - lineStart.y;
+    const lengthSq = dx * dx + dy * dy;
+
+    if (lengthSq === 0) {
+        return Math.sqrt((point.x - lineStart.x) ** 2 + (point.y - lineStart.y) ** 2);
+    }
+
+    let t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lengthSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const projX = lineStart.x + t * dx;
+    const projY = lineStart.y + t * dy;
+
+    return Math.sqrt((point.x - projX) ** 2 + (point.y - projY) ** 2);
+}
+
+function isPointInQuad(point, quad) {
+    const corners = [quad.pos1, quad.pos2, quad.pos3, quad.pos4];
+    let inside = false;
+
+    for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+        const xi = corners[i].x, yi = corners[i].y;
+        const xj = corners[j].x, yj = corners[j].y;
+
+        const intersect = ((yi > point.y) !== (yj > point.y)) &&
+            (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+
+        if (intersect) inside = !inside;
+    }
+
+    return inside;
+}
+
+function getObjectMoveData(obj) {
+    if (obj.type === "line") {
+        return {
+            type: "line",
+            start: { x: obj.start.x, y: obj.start.y },
+            end: { x: obj.end.x, y: obj.end.y }
+        };
+    } else if (obj.type === "quad") {
+        return {
+            type: "quad",
+            pos1: { x: obj.pos1.x, y: obj.pos1.y },
+            pos2: { x: obj.pos2.x, y: obj.pos2.y },
+            pos3: { x: obj.pos3.x, y: obj.pos3.y },
+            pos4: { x: obj.pos4.x, y: obj.pos4.y }
+        };
+    }
+    return null;
+}
+
+function moveObject(obj, delta) {
+    if (obj.type === "line") {
+        obj.start.x = rnd(obj.start.x + delta.x);
+        obj.start.y = rnd(obj.start.y + delta.y);
+        obj.end.x = rnd(obj.end.x + delta.x);
+        obj.end.y = rnd(obj.end.y + delta.y);
+    } else if (obj.type === "quad") {
+        obj.pos1.x = rnd(obj.pos1.x + delta.x);
+        obj.pos1.y = rnd(obj.pos1.y + delta.y);
+        obj.pos2.x = rnd(obj.pos2.x + delta.x);
+        obj.pos2.y = rnd(obj.pos2.y + delta.y);
+        obj.pos3.x = rnd(obj.pos3.x + delta.x);
+        obj.pos3.y = rnd(obj.pos3.y + delta.y);
+        obj.pos4.x = rnd(obj.pos4.x + delta.x);
+        obj.pos4.y = rnd(obj.pos4.y + delta.y);
+    }
+}
+
+function toggleDrawingAnimation() {
+    const btn = document.getElementById("playAnimationBtn");
+
+    if (isAnimatingDrawing) {
+        stopDrawingAnimation();
+        return;
+    }
+
+    if (objects.size === 0) return;
+
+    unselectAnyObjects();
+
+    isAnimatingDrawing = true;
+    animatedObjectsList = Array.from(objects.values());
+    animationProgress = 0;
+
+    animationSpeed = animationSpeedMultiplier;
+
+    if (btn) {
+        btn.innerHTML = lang.stopAnimationBtn;
+        btn.style.background = "#eb3b3b";
+    }
+}
+
+function stopDrawingAnimation() {
+    isAnimatingDrawing = false;
+    animatedObjectsList = [];
+    const btn = document.getElementById("playAnimationBtn");
+    if (btn) {
+        btn.innerHTML = lang.playAnimationBtn;
+        btn.style.background = "var(--input-bg)";
+    }
+}
+
+// Canvas interaction
+
+let canvasHover = false;
+
+canvas.onpointerover = (e) => {
+    canvasHover = true;
+};
+
+canvas.onpointerleave = (e) => {
+    canvasHover = false;
+    isHatchDragging = false;
+    isFillDragging = false;
+    if (tool !== "hatch" || !isDrawingHatch) {
+        clearDrawing();
+    }
+};
+
+canvas.oncontextmenu = (e) => {
+    e.preventDefault();
+};
+
+let dragging = false;
+
+let arrowPulling = false;
+let posPulled = null;
+
+let activeTouches = new Map();
+let longPressTimeout = null;
+let isTouchGesturing = false;
+let initialPinchDist = 0;
+let initialPinchAngle = undefined;
+let initialVisualRotation = 0;
+let lastPinchCenter = null;
+let lastTouchZoom = 1;
+
+canvas.onpointerdown = (e) => {
+
+    if (window.isAnimatingDrawing && e.button !== 2) return;
+
+    lastMousePosCanvas = getMousePos(e.offsetX, e.offsetY);
+
+    if (e.pointerType === 'touch') {
+        activeTouches.set(e.pointerId, {
+            startX: e.clientX, startY: e.clientY,
+            offsetX: e.offsetX, offsetY: e.offsetY,
+            clientX: e.clientX, clientY: e.clientY
+        });
+
+        if (activeTouches.size === 1) {
+            isTouchGesturing = false;
+            longPressTimeout = setTimeout(() => {
+                if (!isTouchGesturing) {
+                    const mousePos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+
+                    const prevSelectedId = typeof selectedId !== 'undefined' ? selectedId : null;
+                    const wasInMultiSelect = typeof selectedObjectsSet !== 'undefined' && prevSelectedId !== null ? selectedObjectsSet.has(prevSelectedId) : false;
+
+                    clearSelection();
+                    selectNearest(mousePos);
+
+                    if (selectedId !== null) {
+                        if (prevSelectedId === selectedId || wasInMultiSelect) {
+                            clearSelection();
+                            showInfo(null);
+                        }
+
+                        if (navigator.vibrate) navigator.vibrate(50);
+                    } else {
+                        showInfo(null);
+                    }
+
+                    updateSelectionInfo();
+                    refreshObjectsList();
+
+                    isTouchGesturing = true;
+                }
+            }, 500);
+        } else if (activeTouches.size === 2) {
+            isTouchGesturing = true;
+            clearTimeout(longPressTimeout);
+
+            if (tool === "hatch" && typeof hatchPoints !== 'undefined' && lastAddedHatchPointTime) {
+                if (Date.now() - lastAddedHatchPointTime < 300) {
+                    if (lastHatchAction === 'add') {
+                        hatchPoints.pop();
+                    } else if (lastHatchAction === 'remove') {
+                        hatchPoints.splice(lastHatchRemovedIndex, 0, lastHatchRemovedPoint);
+                    } else if (lastHatchAction === 'start') {
+                        if (typeof cancelHatch === 'function') cancelHatch();
+                    }
+                    if (isDrawingHatch && typeof updateHatchPreview === 'function') updateHatchPreview();
+                }
+            }
+
+            if (tool === "fill" && typeof fillPoints !== 'undefined' && lastAddedFillPointTime) {
+                if (Date.now() - lastAddedFillPointTime < 300) {
+                    if (lastFillAction === 'add') {
+                        fillPoints.pop();
+                    } else if (lastFillAction === 'remove') {
+                        fillPoints.splice(lastFillRemovedIndex, 0, lastFillRemovedPoint);
+                    } else if (lastFillAction === 'start') {
+                        if (typeof cancelFill === 'function') cancelFill();
+                    }
+                    if (isDrawingFill && typeof updateFillPreview === 'function') updateFillPreview();
+                }
+            }
+
+            if (drawing && typeof clearDrawing === 'function') clearDrawing();
+            if (typeof isHatchDragging !== 'undefined') isHatchDragging = false;
+            if (typeof isFillDragging !== 'undefined') isFillDragging = false;
+            if (typeof hatchVertexDragIndex !== 'undefined') hatchVertexDragIndex = -1;
+            if (typeof hatchVertexDragMoved !== 'undefined') hatchVertexDragMoved = false;
+            if (typeof hatchVertexDragIsNew !== 'undefined') hatchVertexDragIsNew = false;
+            if (typeof fillVertexDragIndex !== 'undefined') fillVertexDragIndex = -1;
+            if (typeof fillVertexDragMoved !== 'undefined') fillVertexDragMoved = false;
+            if (typeof fillVertexDragIsNew !== 'undefined') fillVertexDragIsNew = false;
+
+            isPullingCenter = false;
+            arrowPulling = false;
+            isDraggingSelected = false;
+            dragStartPos = null;
+
+            const touches = Array.from(activeTouches.values());
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            initialPinchDist = Math.sqrt(dx * dx + dy * dy);
+
+            initialPinchAngle = Math.atan2(dy, dx);
+            initialVisualRotation = globalVisualRotation;
+
+            lastPinchCenter = getMousePos(
+                (touches[0].offsetX + touches[1].offsetX) / 2,
+                (touches[0].offsetY + touches[1].offsetY) / 2
+            );
+            lastTouchZoom = screenZoom;
+            return;
+        } else {
+            return;
+        }
+
+        if (isTouchGesturing) return;
+    }
+
+    if (e.button === 2) {
+        dragging = true;
+        //console.log("drag start");
+    }
+
+    if (e.button === 1) {
+        e.preventDefault();
+        selectNearest(v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY)));
+    }
+
+    if (e.button === 0) {
+        if (typeof currentActiveTabId !== 'undefined' && currentActiveTabId === 'reference' && typeof isRefFreeMove !== 'undefined' && isRefFreeMove) {
+            const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+            let clickPos = v2canvas2v2disposSight(clickCanvas);
+            const box = typeof getRefTransformBox === 'function' ? getRefTransformBox() : null;
+
+            if (box) {
+                const handles = getTransformHandles(box);
+                const hitRadius = 12 / screenZoom / getBaseScale();
+                const dist = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+                let hitHandle = handles.find(h => {
+                    const radiusMod = h.id === 'rotate' ? 1.8 : 1.5;
+                    return dist(clickPos, h.p) < hitRadius * radiusMod;
+                });
+
+                if (hitHandle) {
+                    refTransformState.action = hitHandle.id;
+                    refTransformState.startRef = JSON.parse(JSON.stringify(referenceArray[currentReference]));
+                    refTransformState.startRef.obj = referenceArray[currentReference].obj;
+                    refTransformState.startMouse = clickPos;
+                    refTransformState.startAngle = Math.atan2(clickPos.y - box.cy, clickPos.x - box.cx);
+                    return;
+                } else {
+                    const dx = clickPos.x - box.cx;
+                    const dy = clickPos.y - box.cy;
+                    const localX = dx * Math.cos(box.angle) + dy * Math.sin(box.angle);
+                    const localY = -dx * Math.sin(box.angle) + dy * Math.cos(box.angle);
+
+                    if (Math.abs(localX) < box.w / 2 && Math.abs(localY) < box.h / 2) {
+                        refTransformState.action = 'move';
+                        refTransformState.offsetX = dx;
+                        refTransformState.offsetY = dy;
+                        return;
+                    }
+                }
+            }
+        }
+        mousePos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+        mousePosWindow = getMousePos(e.offsetX, e.offsetY);
+
+        if (selectedId != null) {
+            const arrowHitboxes = getArrowHitboxes();
+            hoveredArrowHitbox = null;
+            for (let i = 0; i < arrowHitboxes.length; i++) {
+                const hitbox = arrowHitboxes[i];
+                if (hitbox.type === 'rect') {
+                    if (mousePosWindow.x > hitbox.x1 && mousePosWindow.y > hitbox.y1 &&
+                        mousePosWindow.x < hitbox.x2 && mousePosWindow.y < hitbox.y2) {
+                        hoveredArrowHitbox = i;
+                    }
+                } else if (hitbox.type === 'circle') {
+                    const dist = Math.hypot(mousePosWindow.x - hitbox.x, mousePosWindow.y - hitbox.y);
+                    if (dist <= hitbox.r) {
+                        hoveredArrowHitbox = i;
+                    }
+                }
+            }
+        }
+
+        if (selectedId != null && hoveredArrowHitbox != null) // Arrow pulling
+        {
+            const hSource = Math.floor(hoveredArrowHitbox / 3);
+            const hAxis = hoveredArrowHitbox % 3;
+
+            if (hAxis === 2) {
+                isPullingCenter = true;
+                centerPullSource = hSource;
+                const object = objects.get(selectedId);
+                centerPullStartData = getObjectMoveData(object);
+            }
+            else {
+                arrowPulling = true;
+                posPulled = hSource * 2 + hAxis;
+
+                const object = objects.get(selectedId);
+                let prevValue;
+
+                switch (object.type) {
+                    case "line":
+                        switch (posPulled) {
+                            case 0: prevValue = object.start.x; break;
+                            case 1: prevValue = object.start.y; break;
+                            case 2: prevValue = object.end.x; break;
+                            case 3: prevValue = object.end.y; break;
+                        }
+                        break;
+                    case "quad":
+                        switch (posPulled) {
+                            case 0: prevValue = object.pos1.x; break;
+                            case 1: prevValue = object.pos1.y; break;
+                            case 2: prevValue = object.pos2.x; break;
+                            case 3: prevValue = object.pos2.y; break;
+                            case 4: prevValue = object.pos3.x; break;
+                            case 5: prevValue = object.pos3.y; break;
+                            case 6: prevValue = object.pos4.x; break;
+                            case 7: prevValue = object.pos4.y; break;
+                        }
+                        break;
+                }
+                pushEvent("move", { id: selectedId, posPulled: posPulled, prevValue: prevValue });
+            }
+        } else if (tool === "text") {
+            const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+            let clickPos = v2canvas2v2disposSight(clickCanvas);
+
+            if (!textToolState.active) {
+                textToolState.active = true;
+                textToolState.rect.x = clickPos.x;
+                textToolState.rect.y = clickPos.y;
+
+                const fontSize = parseFloat(document.getElementById('textFontSize').value) || 4;
+
+                textToolState.rect.w = fontSize * 0.05; // Ширина
+                textToolState.rect.h = fontSize * 0.012; // Высота
+
+                document.getElementById('textInputContent').focus();
+                updateTextPreview();
+            } else {
+                const hitRadius = 20 / screenZoom / getBaseScale();
+
+                const dist = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+                const tl = { x: textToolState.rect.x, y: textToolState.rect.y };
+                const tr = { x: textToolState.rect.x + textToolState.rect.w, y: textToolState.rect.y };
+                const bl = { x: textToolState.rect.x, y: textToolState.rect.y + textToolState.rect.h };
+                const br = { x: textToolState.rect.x + textToolState.rect.w, y: textToolState.rect.y + textToolState.rect.h };
+
+                if (dist(clickPos, br) < hitRadius) textToolState.action = 'resize_br';
+                else if (dist(clickPos, tr) < hitRadius) textToolState.action = 'resize_tr';
+                else if (dist(clickPos, bl) < hitRadius) textToolState.action = 'resize_bl';
+                else if (dist(clickPos, tl) < hitRadius) textToolState.action = 'resize_tl';
+                else if (clickPos.x > tl.x && clickPos.x < br.x && clickPos.y > tl.y && clickPos.y < br.y) {
+                    textToolState.action = 'move';
+                    textToolState.offsetX = clickPos.x - textToolState.rect.x;
+                    textToolState.offsetY = clickPos.y - textToolState.rect.y;
+                } else {
+                    textToolState.rect.x = clickPos.x;
+                    textToolState.rect.y = clickPos.y;
+                    document.getElementById('textInputContent').focus();
+                    updateTextPreview();
+                }
+            }
+        } else if (tool === "shapes") {
+            const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+            let clickPos = v2canvas2v2disposSight(clickCanvas);
+
+            if (freeShapeState.active) {
+                freeShapeState.points = [clickPos];
+            } else if (!shapesToolState.active) {
+                shapesToolState.active = true;
+                shapesToolState.box.cx = clickPos.x;
+                shapesToolState.box.cy = clickPos.y;
+                shapesToolState.box.w = 0.1;
+                shapesToolState.box.h = 0.1;
+                shapesToolState.box.angle = 0;
+                updateShapesPreview();
+            } else {
+                const handles = getShapesTransformHandles(shapesToolState.box);
+                const hitRadius = 12 / screenZoom / getBaseScale();
+                const dist = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+                let hitHandle = handles.find(h => {
+                    const radiusMod = h.id === 'rotate' ? 1.8 : 1.5;
+                    return dist(clickPos, h.p) < hitRadius * radiusMod;
+                });
+
+                if (hitHandle) {
+                    shapesToolState.action = hitHandle.id;
+                    shapesToolState.startBox = JSON.parse(JSON.stringify(shapesToolState.box));
+                    shapesToolState.startMouse = clickPos;
+                    shapesToolState.startAngle = Math.atan2(clickPos.y - shapesToolState.box.cy, clickPos.x - shapesToolState.box.cx);
+                } else if (Math.abs(clickPos.x - shapesToolState.box.cx) < shapesToolState.box.w / 2 &&
+                    Math.abs(clickPos.y - shapesToolState.box.cy) < shapesToolState.box.h / 2) {
+                    shapesToolState.action = 'move';
+                    shapesToolState.offsetX = clickPos.x - shapesToolState.box.cx;
+                    shapesToolState.offsetY = clickPos.y - shapesToolState.box.cy;
+                } else {
+                    shapesToolState.box.cx = clickPos.x;
+                    shapesToolState.box.cy = clickPos.y;
+                    updateShapesPreview();
+                }
+            }
+        } else if (tool === "select") {
+            const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+            const clickWorld = v2canvas2v2disposSight(clickCanvas);
+
+            if (selectedObjectsSet.size > 0 && !selectionRect && transformState.box) {
+                const handles = getTransformHandles(transformState.box);
+                const hitRadius = 8 / screenZoom / getBaseScale();
+                const dist = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+                let hitHandle = handles.find(h => {
+                    const radiusMod = h.id === 'rotate' ? 1.8 : 1.5;
+                    return dist(clickWorld, h.p) < hitRadius * radiusMod;
+                });
+
+                if (hitHandle) {
+                    transformState.active = true;
+                    transformState.action = hitHandle.id;
+                    transformState.initialBox = JSON.parse(JSON.stringify(transformState.box));
+                    transformState.initialMousePos = clickWorld;
+                    transformState.startAngle = Math.atan2(clickWorld.y - transformState.box.cy, clickWorld.x - transformState.box.cx);
+
+                    transformState.initialData = [];
+                    for (const id of selectedObjectsSet) {
+                        const obj = objects.get(id);
+                        if (obj) {
+                            transformState.initialData.push({ id: id, object: obj, startData: getObjectMoveData(obj) });
+                        }
+                    }
+                    return;
+                }
+            }
+
+            if (selectedObjectsSet.size > 0) {
+                let clickedOnSelected = false;
+
+                for (const id of selectedObjectsSet) {
+                    const obj = objects.get(id);
+                    if (obj) {
+                        if (obj.type === "line") {
+                            const dist = distanceToLine(clickWorld, obj.start, obj.end);
+                            const hitRadius = ('ontouchstart' in window ? 35 : 15) / screenZoom / getBaseScale();
+                            if (dist < hitRadius) {
+                                clickedOnSelected = true;
+                                break;
+                            }
+                        } else if (obj.type === "quad") {
+                            if (isPointInQuad(clickWorld, obj)) {
+                                clickedOnSelected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (clickedOnSelected) {
+                    isDraggingSelected = true;
+                    dragStartPos = clickWorld;
+
+                    if (transformState.box) {
+                        transformState.boxStartCx = transformState.box.cx;
+                        transformState.boxStartCy = transformState.box.cy;
+                    }
+
+                    dragObjectsData = [];
+                    for (const id of selectedObjectsSet) {
+                        const obj = objects.get(id);
+                        if (obj) {
+                            dragObjectsData.push({
+                                id: id,
+                                object: obj,
+                                startData: getObjectMoveData(obj)
+                            });
+                        }
+                    }
+                    return;
+                }
+            }
+
+            isSelecting = true;
+            if (selectionShapeMode === 'rect') {
+                selectionRect = {
+                    startX: clickWorld.x, startY: clickWorld.y,
+                    endX: clickWorld.x, endY: clickWorld.y
+                };
+            } else {
+                lassoPoints = [clickWorld];
+            }
+
+            for (const [id, obj] of objects) {
+                obj.selected = false;
+            }
+
+            if (selectedId !== null) {
+                selectedId = null;
+                showInfo(null);
+            }
+
+            selectedObjectsSet.clear();
+            updateSelectionInfo();
+        }
+        else {
+            let snapRad = (mobileSnappingActive && !snapping) ? 40 : Infinity;
+
+            if (tool === "hatch") {
+                const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+                let clickPos = v2canvas2v2disposSight(clickCanvas);
+
+                if (typeof hatchInputMode !== 'undefined' && hatchInputMode === 'wand') {
+                    executeMagicWand(clickPos);
+                } else {
+                    const hitVertexIndex = (typeof hitTestHatchVertex === 'function') ? hitTestHatchVertex(clickPos) : -1;
+
+                    if (hitVertexIndex !== -1) {
+                        startHatchVertexDrag(hitVertexIndex);
+                    } else {
+                        const hitEdge = (typeof hitTestHatchEdge === 'function') ? hitTestHatchEdge(clickPos) : null;
+
+                        if (hitEdge !== null) {
+                            const insertedIndex = insertHatchPointAfter(hitEdge.afterIndex, hitEdge.pos);
+                            startHatchVertexDrag(insertedIndex, true);
+                        } else {
+                            if (snapping || mobileSnappingActive) {
+                                const snapPos = snappingPos(clickPos, snapRad);
+                                if (snapPos != null) clickPos = snapPos;
+                            }
+                            if (!isDrawingHatch) startHatchDrawing(clickPos);
+                            else addHatchPoint(clickPos, false);
+                            isHatchDragging = true;
+                        }
+                    }
+                }
+            }
+            else if (tool === "fill") {
+                const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+                let clickPos = v2canvas2v2disposSight(clickCanvas);
+
+                if (typeof fillInputMode !== 'undefined' && fillInputMode === 'wand') {
+                    executeFillMagicWand(clickPos);
+                } else {
+                    const hitVertexIndex = hitTestFillVertex(clickPos);
+
+                    if (hitVertexIndex !== -1) {
+                        startFillVertexDrag(hitVertexIndex);
+                    } else {
+                        const hitEdge = hitTestFillEdge(clickPos);
+
+                        if (hitEdge !== null) {
+                            const insertedIndex = insertFillPointAfter(hitEdge.afterIndex, hitEdge.pos);
+                            startFillVertexDrag(insertedIndex, true);
+                        } else {
+                            if (snapping || mobileSnappingActive) {
+                                const snapPos = snappingPos(clickPos, snapRad);
+                                if (snapPos != null) clickPos = snapPos;
+                            }
+                            if (!isDrawingFill) startFillDrawing(clickPos);
+                            else addFillPoint(clickPos, false);
+                            isFillDragging = true;
+                        }
+                    }
+                }
+            }
+            else if (tool === "curve") {
+                const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+                let clickPos = v2canvas2v2disposSight(clickCanvas);
+
+                isDrawingCurve = true;
+                curvePoints = [];
+
+                if (snapping || mobileSnappingActive) {
+                    const snapPos = snappingPos(clickPos, snapRad);
+                    if (snapPos != null) {
+                        curvePoints.push(snapPos);
+                    }
+                }
+                curvePoints.push(clickPos);
+            } else if (tool === "brush") {
+                const clickCanvas = getMousePos(e.offsetX, e.offsetY);
+                let clickPos = v2canvas2v2disposSight(clickCanvas);
+
+                isDrawingBrush = true;
+                brushPoints = [];
+
+                if (snapping || mobileSnappingActive) {
+                    const snapPos = snappingPos(clickPos, snapRad);
+                    if (snapPos) {
+                        brushPoints.push({ x: snapPos.x, y: snapPos.y });
+                        brushStartSnapInfo = snapPos.snapInfo || null;
+                    }
+                    if (snapPos != null) {
+                        brushPoints.push(snapPos);
+                    }
+                }
+                brushPoints.push(clickPos);
+            }
+            else {
+                if (!(snapping || mobileSnappingActive))
+                    startDrawing(mousePos);
+                else {
+                    const snapPos = snappingPos(mousePos, snapRad);
+                    if (snapPos != null)
+                        startDrawing(snapPos);
+                    else
+                        startDrawing(mousePos);
+                }
+            }
+        }
+
+        //const pixelPos = v2canvas2v2pixel(pos);
+        //const sightPos = v2pixel2v2sight(pixelPos);
+        //const disposSightPos = v2sight2v2disposSight(sightPos);
+        //console.log(pos);
+        //console.log(pixelPos);
+        //console.log(sightPos);
+        //console.log(disposSightPos);
+        //console.log("drawing start");
+    }
+};
+
+// let canvasDragSensitivity = 2;
+// let canvasPullSensitivity = 1.5;
+
+canvas.onpointermove = (e) => {
+    if (e.pointerType === 'touch') {
+        if (activeTouches.has(e.pointerId)) {
+            const touchData = activeTouches.get(e.pointerId);
+            touchData.offsetX = e.offsetX;
+            touchData.offsetY = e.offsetY;
+            touchData.clientX = e.clientX;
+            touchData.clientY = e.clientY;
+
+            if (activeTouches.size === 1 && !isTouchGesturing) {
+                const dist = Math.hypot(e.clientX - touchData.startX, e.clientY - touchData.startY);
+                if (dist > 10) clearTimeout(longPressTimeout);
+            }
+        }
+
+        if (activeTouches.size === 2) {
+            const touches = Array.from(activeTouches.values());
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (initialPinchAngle !== undefined) {
+                const currentAngle = Math.atan2(dy, dx);
+                let angleDiff = currentAngle - initialPinchAngle;
+                let degDiff = angleDiff * 180 / Math.PI;
+
+                if (degDiff > 180) degDiff -= 360;
+                if (degDiff < -180) degDiff += 360;
+
+                const rotationSensitivity = 0.8;
+                globalVisualRotation = initialVisualRotation + (degDiff * rotationSensitivity);
+                const visualInput = document.getElementById("visualRotationInput");
+                if (visualInput) visualInput.value = Math.round(globalVisualRotation);
+            }
+
+            const centerOffsetX = (touches[0].offsetX + touches[1].offsetX) / 2;
+            const centerOffsetY = (touches[0].offsetY + touches[1].offsetY) / 2;
+            const currentCenter = getMousePos(centerOffsetX, centerOffsetY);
+
+            if (initialPinchDist > 0) {
+                const zoomFactor = dist / initialPinchDist;
+                screenZoom = Math.max(0.1, lastTouchZoom * zoomFactor);
+            }
+
+            if (lastPinchCenter) {
+                const exactMovement = {
+                    x: currentCenter.x - lastPinchCenter.x,
+                    y: currentCenter.y - lastPinchCenter.y
+                };
+                const sightMovement = v2pixel2v2sight(exactMovement);
+                screenPos = v2add(screenPos, v2inv(sightMovement));
+            }
+
+            lastPinchCenter = currentCenter;
+            lastMousePosCanvas = currentCenter;
+            return;
+        }
+
+        if (isTouchGesturing) return;
+    }
+
+    const currentMousePosCanvas = getMousePos(e.offsetX, e.offsetY);
+
+    const exactMovement = {
+        x: currentMousePosCanvas.x - lastMousePosCanvas.x,
+        y: currentMousePosCanvas.y - lastMousePosCanvas.y
+    };
+
+    lastMousePosCanvas = currentMousePosCanvas;
+
+    mousePos = v2canvas2v2disposSight(currentMousePosCanvas);
+    mousePosWindow = currentMousePosCanvas;
+
+    if (typeof currentActiveTabId !== 'undefined' && currentActiveTabId === 'reference' && typeof isRefFreeMove !== 'undefined' && isRefFreeMove && typeof refTransformState !== 'undefined' && refTransformState.action) {
+        const ref = referenceArray[currentReference];
+
+        if (refTransformState.action === 'move') {
+            ref.x = mousePos.x - refTransformState.offsetX;
+            ref.y = mousePos.y - refTransformState.offsetY;
+        } else {
+            const initialRef = refTransformState.startRef;
+            if (!initialRef || !initialRef.obj) return;
+
+            const aspectRatio = initialRef.obj.width / initialRef.obj.height;
+            const initialBox = {
+                cx: initialRef.x, cy: initialRef.y,
+                w: initialRef.size * aspectRatio, h: initialRef.size,
+                angle: initialRef.rotation * Math.PI / 180
+            };
+
+            if (refTransformState.action === 'rotate') {
+                const currentAngle = Math.atan2(mousePos.y - initialBox.cy, mousePos.x - initialBox.cx);
+                let deltaAngle = currentAngle - refTransformState.startAngle;
+                if (e.shiftKey) {
+                    const step = Math.PI / 12;
+                    deltaAngle = Math.round(deltaAngle / step) * step;
+                }
+                ref.rotation = initialRef.rotation + (deltaAngle * 180 / Math.PI);
+            } else {
+                const dx = mousePos.x - initialBox.cx, dy = mousePos.y - initialBox.cy;
+                const localX = dx * Math.cos(initialBox.angle) + dy * Math.sin(initialBox.angle);
+                const localY = -dx * Math.sin(initialBox.angle) + dy * Math.cos(initialBox.angle);
+
+                const dir = refTransformState.action.split('_')[1] || '';
+                const isLeft = dir.includes('l'), isRight = dir.includes('r');
+                const isTop = dir.includes('t'), isBottom = dir.includes('b');
+                const isCorner = ['tl', 'tr', 'bl', 'br'].includes(dir);
+
+                const signX = isRight ? 1 : (isLeft ? -1 : 0);
+                const signY = isBottom ? 1 : (isTop ? -1 : 0);
+                const isCenterScale = e.shiftKey && !isCorner;
+
+                let originLocalX = signX === 1 ? -initialBox.w / 2 : (signX === -1 ? initialBox.w / 2 : 0);
+                let originLocalY = signY === 1 ? -initialBox.h / 2 : (signY === -1 ? initialBox.h / 2 : 0);
+
+                let newW = initialBox.w, newH = initialBox.h;
+
+                if (isCenterScale) {
+                    if (signX !== 0) newW = Math.max(0.01, localX * signX * 2);
+                    if (signY !== 0) newH = Math.max(0.01, localY * signY * 2);
+                } else {
+                    if (signX !== 0) newW = Math.max(0.01, (localX - originLocalX) * signX);
+                    if (signY !== 0) newH = Math.max(0.01, (localY - originLocalY) * signY);
+                }
+
+                let scaleFactor = 1;
+                if (signX !== 0 && signY !== 0) {
+                    scaleFactor = Math.max(newW / initialBox.w, newH / initialBox.h);
+                } else if (signX !== 0) {
+                    scaleFactor = newW / initialBox.w;
+                } else if (signY !== 0) {
+                    scaleFactor = newH / initialBox.h;
+                }
+
+                newW = initialBox.w * scaleFactor;
+                newH = initialBox.h * scaleFactor;
+                ref.size = newH;
+
+                let newLocalCx = 0, newLocalCy = 0;
+                if (isCenterScale) {
+                    newLocalCx = 0;
+                    newLocalCy = 0;
+                } else {
+                    newLocalCx = originLocalX + (signX !== 0 ? (newW / 2) * signX : 0);
+                    newLocalCy = originLocalY + (signY !== 0 ? (newH / 2) * signY : 0);
+                }
+
+                ref.x = initialBox.cx + newLocalCx * Math.cos(initialBox.angle) - newLocalCy * Math.sin(initialBox.angle);
+                ref.y = initialBox.cy + newLocalCx * Math.sin(initialBox.angle) + newLocalCy * Math.cos(initialBox.angle);
+            }
+        }
+
+        if (typeof setReferenceMenu === 'function') setReferenceMenu();
+        return;
+    }
+
+    if (tool === "curve" && isDrawingCurve) {
+        let mousePos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+
+        let lastPoint = curvePoints[curvePoints.length - 1];
+        if (v2sqrmag(mousePos, lastPoint) > 0.00000005) {
+            curvePoints.push(mousePos);
+        }
+    }
+    if (tool === "hatch" && isDrawingHatch && hatchVertexDragIndex !== -1) {
+        dragHatchVertex(mousePos);
+    }
+    if (tool === "hatch" && isDrawingHatch && isHatchDragging && hatchVertexDragIndex === -1 && snapping) {
+        const snapPos = snappingPos(mousePos, 40);
+        if (snapPos != null) {
+            addHatchPoint(snapPos, true);
+        }
+    }
+    if (tool === "fill" && isDrawingFill && fillVertexDragIndex !== -1) {
+        dragFillVertex(mousePos);
+    }
+    if (tool === "fill" && isDrawingFill && isFillDragging && fillVertexDragIndex === -1 && snapping) {
+        const snapPos = snappingPos(mousePos, 40);
+        if (snapPos != null) addFillPoint(snapPos, true);
+    }
+    const sightMovement = v2pixel2v2sight(exactMovement);
+    const pullMovement = v2pixel2v2sight(exactMovement);
+    if (tool === "text" && textToolState.action) {
+        if (textToolState.action === 'move') {
+            textToolState.rect.x = mousePos.x - textToolState.offsetX;
+            textToolState.rect.y = mousePos.y - textToolState.offsetY;
+        }
+        else if (textToolState.action === 'resize_br') {
+            textToolState.rect.w = Math.max(0.025, mousePos.x - textToolState.rect.x);
+            textToolState.rect.h = Math.max(0.025, mousePos.y - textToolState.rect.y);
+        }
+        else if (textToolState.action === 'resize_tr') {
+            textToolState.rect.w = Math.max(0.025, mousePos.x - textToolState.rect.x);
+            let deltaY = textToolState.rect.y - mousePos.y;
+            textToolState.rect.y = mousePos.y;
+            textToolState.rect.h = Math.max(0.025, textToolState.rect.h + deltaY);
+        }
+        else if (textToolState.action === 'resize_bl') {
+            let deltaX = textToolState.rect.x - mousePos.x;
+            textToolState.rect.x = mousePos.x;
+            textToolState.rect.w = Math.max(0.025, textToolState.rect.w + deltaX);
+            textToolState.rect.h = Math.max(0.025, mousePos.y - textToolState.rect.y);
+        }
+        else if (textToolState.action === 'resize_tl') {
+            let deltaX = textToolState.rect.x - mousePos.x;
+            let deltaY = textToolState.rect.y - mousePos.y;
+            textToolState.rect.x = mousePos.x;
+            textToolState.rect.y = mousePos.y;
+            textToolState.rect.w = Math.max(0.025, textToolState.rect.w + deltaX);
+            textToolState.rect.h = Math.max(0.025, textToolState.rect.h + deltaY);
+        }
+        updateTextPreview();
+    }
+    if (tool === "shapes" && shapesToolState.action) {
+        if (shapesToolState.action === 'move') {
+            shapesToolState.box.cx = mousePos.x - shapesToolState.offsetX;
+            shapesToolState.box.cy = mousePos.y - shapesToolState.offsetY;
+        } else if (shapesToolState.action === 'rotate') {
+            const currentAngle = Math.atan2(mousePos.y - shapesToolState.startBox.cy, mousePos.x - shapesToolState.startBox.cx);
+            let deltaAngle = currentAngle - shapesToolState.startAngle;
+            if (e.shiftKey) {
+                const step = Math.PI / 12;
+                deltaAngle = Math.round(deltaAngle / step) * step;
+            }
+            shapesToolState.box.angle = shapesToolState.startBox.angle + deltaAngle;
+        } else {
+            const action = shapesToolState.action;
+            const initialBox = shapesToolState.startBox;
+
+            const dx = mousePos.x - initialBox.cx, dy = mousePos.y - initialBox.cy;
+            const localX = dx * Math.cos(initialBox.angle) + dy * Math.sin(initialBox.angle);
+            const localY = -dx * Math.sin(initialBox.angle) + dy * Math.cos(initialBox.angle);
+
+            const dir = action.split('_')[1] || '';
+            const isLeft = dir.includes('l'), isRight = dir.includes('r');
+            const isTop = dir.includes('t'), isBottom = dir.includes('b');
+            const isCorner = ['tl', 'tr', 'bl', 'br'].includes(dir);
+
+            const signX = isRight ? 1 : (isLeft ? -1 : 0);
+            const signY = isBottom ? 1 : (isTop ? -1 : 0);
+
+            const isCenterScale = e.shiftKey && !isCorner;
+
+            let originLocalX = signX === 1 ? -initialBox.w / 2 : (signX === -1 ? initialBox.w / 2 : 0);
+            let originLocalY = signY === 1 ? -initialBox.h / 2 : (signY === -1 ? initialBox.h / 2 : 0);
+
+            let newW = initialBox.w, newH = initialBox.h;
+
+            if (isCenterScale) {
+                originLocalX = 0;
+                originLocalY = 0;
+                if (signX !== 0) newW = Math.max(0.01, localX * signX * 2);
+                if (signY !== 0) newH = Math.max(0.01, localY * signY * 2);
+            } else {
+                if (signX !== 0) newW = Math.max(0.01, (localX - originLocalX) * signX);
+                if (signY !== 0) newH = Math.max(0.01, (localY - originLocalY) * signY);
+            }
+            if (e.shiftKey && isCorner) {
+                const s = Math.max(newW / initialBox.w, newH / initialBox.h);
+                newW = initialBox.w * s;
+                newH = initialBox.h * s;
+            }
+
+            shapesToolState.box.w = newW;
+            shapesToolState.box.h = newH;
+
+            let newLocalCx = 0, newLocalCy = 0;
+            if (isCenterScale) {
+                newLocalCx = 0;
+                newLocalCy = 0;
+            } else {
+                newLocalCx = originLocalX + (signX !== 0 ? (newW / 2) * signX : 0);
+                newLocalCy = originLocalY + (signY !== 0 ? (newH / 2) * signY : 0);
+            }
+
+            shapesToolState.box.cx = initialBox.cx + newLocalCx * Math.cos(initialBox.angle) - newLocalCy * Math.sin(initialBox.angle);
+            shapesToolState.box.cy = initialBox.cy + newLocalCx * Math.sin(initialBox.angle) + newLocalCy * Math.cos(initialBox.angle);
+        }
+        updateShapesPreview();
+    }
+    if (tool === "select" && transformState.active && transformState.action && transformState.initialBox) {
+
+        if (!transformState.box) {
+            transformState.active = false;
+            transformState.action = null;
+            return;
+        }
+        const action = transformState.action;
+        const initialBox = transformState.initialBox;
+
+        if (action === 'rotate') {
+            const currentAngle = Math.atan2(mousePos.y - initialBox.cy, mousePos.x - initialBox.cx);
+            let deltaAngle = currentAngle - transformState.startAngle;
+
+            if (e.shiftKey) {
+                const step = Math.PI / 12;
+                deltaAngle = Math.round(deltaAngle / step) * step;
+            }
+
+            transformState.box.angle = initialBox.angle + deltaAngle;
+
+            const cos = Math.cos(deltaAngle), sin = Math.sin(deltaAngle);
+
+            for (const item of transformState.initialData) {
+                const obj = item.object;
+                const initPts = item.startData.type === 'line' ? [item.startData.start, item.startData.end] : [item.startData.pos1, item.startData.pos2, item.startData.pos3, item.startData.pos4];
+
+                const newPts = initPts.map(p => {
+                    const rx = p.x - initialBox.cx, ry = p.y - initialBox.cy;
+                    return { x: initialBox.cx + rx * cos - ry * sin, y: initialBox.cy + rx * sin + ry * cos };
+                });
+
+                if (obj.type === 'line') { obj.start.x = rnd(newPts[0].x); obj.start.y = rnd(newPts[0].y); obj.end.x = rnd(newPts[1].x); obj.end.y = rnd(newPts[1].y); }
+                else { obj.pos1.x = rnd(newPts[0].x); obj.pos1.y = rnd(newPts[0].y); obj.pos2.x = rnd(newPts[1].x); obj.pos2.y = rnd(newPts[1].y); obj.pos3.x = rnd(newPts[2].x); obj.pos3.y = rnd(newPts[2].y); obj.pos4.x = rnd(newPts[3].x); obj.pos4.y = rnd(newPts[3].y); }
+            }
+        } else {
+            const dx = mousePos.x - initialBox.cx, dy = mousePos.y - initialBox.cy;
+
+            const localX = dx * Math.cos(initialBox.angle) + dy * Math.sin(initialBox.angle);
+            const localY = -dx * Math.sin(initialBox.angle) + dy * Math.cos(initialBox.angle);
+
+            const dir = action.split('_')[1] || '';
+
+            const isLeft = dir.includes('l'), isRight = dir.includes('r');
+            const isTop = dir.includes('t'), isBottom = dir.includes('b');
+            const isCorner = ['tl', 'tr', 'bl', 'br'].includes(dir);
+
+            const signX = isRight ? 1 : (isLeft ? -1 : 0);
+            const signY = isBottom ? 1 : (isTop ? -1 : 0);
+
+            const isCenterScale = e.shiftKey && !isCorner;
+
+            let originLocalX = signX === 1 ? -initialBox.w / 2 : (signX === -1 ? initialBox.w / 2 : 0);
+            let originLocalY = signY === 1 ? -initialBox.h / 2 : (signY === -1 ? initialBox.h / 2 : 0);
+
+            let newW = initialBox.w, newH = initialBox.h;
+
+            if (isCenterScale) {
+                originLocalX = 0;
+                originLocalY = 0;
+                if (signX !== 0) newW = Math.max(0.001, localX * signX * 2);
+                if (signY !== 0) newH = Math.max(0.001, localY * signY * 2);
+            } else {
+                if (signX !== 0) newW = Math.max(0.001, (localX - originLocalX) * signX);
+                if (signY !== 0) newH = Math.max(0.001, (localY - originLocalY) * signY);
+            }
+
+            if (e.shiftKey && isCorner) {
+                const s = Math.max(newW / initialBox.w, newH / initialBox.h);
+                newW = initialBox.w * s;
+                newH = initialBox.h * s;
+            }
+
+            transformState.box.w = newW;
+            transformState.box.h = newH;
+
+            let newLocalCx = 0, newLocalCy = 0;
+            if (isCenterScale) {
+                newLocalCx = 0;
+                newLocalCy = 0;
+            } else {
+                newLocalCx = originLocalX + (signX !== 0 ? (newW / 2) * signX : 0);
+                newLocalCy = originLocalY + (signY !== 0 ? (newH / 2) * signY : 0);
+            }
+
+            transformState.box.cx = initialBox.cx + newLocalCx * Math.cos(initialBox.angle) - newLocalCy * Math.sin(initialBox.angle);
+            transformState.box.cy = initialBox.cy + newLocalCx * Math.sin(initialBox.angle) + newLocalCy * Math.cos(initialBox.angle);
+
+            const originWorldX = initialBox.cx + originLocalX * Math.cos(initialBox.angle) - originLocalY * Math.sin(initialBox.angle);
+            const originWorldY = initialBox.cy + originLocalX * Math.sin(initialBox.angle) + originLocalY * Math.cos(initialBox.angle);
+
+            const sxFactor = signX !== 0 ? (newW / initialBox.w) : 1;
+            const syFactor = signY !== 0 ? (newH / initialBox.h) : 1;
+
+            for (const item of transformState.initialData) {
+                const obj = item.object;
+                const initPts = item.startData.type === 'line' ? [item.startData.start, item.startData.end] : [item.startData.pos1, item.startData.pos2, item.startData.pos3, item.startData.pos4];
+
+                const newPts = initPts.map(p => {
+                    const pdx = p.x - initialBox.cx, pdy = p.y - initialBox.cy;
+                    const pLocalX = pdx * Math.cos(initialBox.angle) + pdy * Math.sin(initialBox.angle);
+                    const pLocalY = -pdx * Math.sin(initialBox.angle) + pdy * Math.cos(initialBox.angle);
+
+                    const scaledLocalX = (pLocalX - originLocalX) * sxFactor;
+                    const scaledLocalY = (pLocalY - originLocalY) * syFactor;
+
+                    return {
+                        x: originWorldX + scaledLocalX * Math.cos(initialBox.angle) - scaledLocalY * Math.sin(initialBox.angle),
+                        y: originWorldY + scaledLocalX * Math.sin(initialBox.angle) + scaledLocalY * Math.cos(initialBox.angle)
+                    };
+                });
+
+                if (obj.type === 'line') { obj.start.x = rnd(newPts[0].x); obj.start.y = rnd(newPts[0].y); obj.end.x = rnd(newPts[1].x); obj.end.y = rnd(newPts[1].y); }
+                else { obj.pos1.x = rnd(newPts[0].x); obj.pos1.y = rnd(newPts[0].y); obj.pos2.x = rnd(newPts[1].x); obj.pos2.y = rnd(newPts[1].y); obj.pos3.x = rnd(newPts[2].x); obj.pos3.y = rnd(newPts[2].y); obj.pos4.x = rnd(newPts[3].x); obj.pos4.y = rnd(newPts[3].y); }
+            }
+        }
+        return;
+    }
+    if (dragging) {
+        screenPos = v2add(screenPos, v2inv(sightMovement));
+    }
+    if (isPullingCenter && selectedId != null) {
+        const object = objects.get(selectedId);
+
+        if (!object) {
+            isPullingCenter = false;
+        } else if (snapping || mobileSnappingActive) {
+            const snapP = snappingPos(mousePos, 100, selectedId);
+            const targetPos = snapP != null ? snapP : mousePos;
+
+            if (object.type === "line") {
+                if (centerPullSource === 0) { object.start.x = rnd(targetPos.x); object.start.y = rnd(targetPos.y); }
+                else if (centerPullSource === 1) { object.end.x = rnd(targetPos.x); object.end.y = rnd(targetPos.y); }
+            } else if (object.type === "quad") {
+                if (centerPullSource === 0) { object.pos1.x = rnd(targetPos.x); object.pos1.y = rnd(targetPos.y); }
+                else if (centerPullSource === 1) { object.pos2.x = rnd(targetPos.x); object.pos2.y = rnd(targetPos.y); }
+                else if (centerPullSource === 2) { object.pos3.x = rnd(targetPos.x); object.pos3.y = rnd(targetPos.y); }
+                else if (centerPullSource === 3) { object.pos4.x = rnd(targetPos.x); object.pos4.y = rnd(targetPos.y); }
+            }
+        } else {
+            if (object.type === "line") {
+                if (centerPullSource === 0) { object.start.x = rnd(mousePos.x); object.start.y = rnd(mousePos.y); }
+                else if (centerPullSource === 1) { object.end.x = rnd(mousePos.x); object.end.y = rnd(mousePos.y); }
+            } else if (object.type === "quad") {
+                if (centerPullSource === 0) { object.pos1.x = rnd(mousePos.x); object.pos1.y = rnd(mousePos.y); }
+                else if (centerPullSource === 1) { object.pos2.x = rnd(mousePos.x); object.pos2.y = rnd(mousePos.y); }
+                else if (centerPullSource === 2) { object.pos3.x = rnd(mousePos.x); object.pos3.y = rnd(mousePos.y); }
+                else if (centerPullSource === 3) { object.pos4.x = rnd(mousePos.x); object.pos4.y = rnd(mousePos.y); }
+            }
+        }
+    }
+    if (arrowPulling) {
+        if (selectedId == null) {
+            arrowPulling = false;
+        }
+        else if (!objects.get(selectedId)) {
+            arrowPulling = false;
+        }
+        else {
+            const object = objects.get(selectedId);
+
+            function pullPos(object, index) {
+                switch (object.type) {
+                    case "line":
+                        switch (index) {
+                            case 0: object.start.x = rnd(object.start.x + pullMovement.x); break;
+                            case 1: object.start.y = rnd(object.start.y + pullMovement.y); break;
+                            case 2: object.end.x = rnd(object.end.x + pullMovement.x); break;
+                            case 3: object.end.y = rnd(object.end.y + pullMovement.y); break;
+                        }
+
+                        break;
+
+                    case "quad":
+                        switch (index) {
+                            case 0: object.pos1.x = rnd(object.pos1.x + pullMovement.x); break;
+                            case 1: object.pos1.y = rnd(object.pos1.y + pullMovement.y); break;
+                            case 2: object.pos2.x = rnd(object.pos2.x + pullMovement.x); break;
+                            case 3: object.pos2.y = rnd(object.pos2.y + pullMovement.y); break;
+                            case 4: object.pos3.x = rnd(object.pos3.x + pullMovement.x); break;
+                            case 5: object.pos3.y = rnd(object.pos3.y + pullMovement.y); break;
+                            case 6: object.pos4.x = rnd(object.pos4.x + pullMovement.x); break;
+                            case 7: object.pos4.y = rnd(object.pos4.y + pullMovement.y); break;
+                        }
+
+                        break;
+                }
+            }
+
+            pullPos(object, posPulled);
+        }
+    }
+    if (isDraggingSelected && dragStartPos) {
+        const currentWorld = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+        const delta = {
+            x: currentWorld.x - dragStartPos.x,
+            y: currentWorld.y - dragStartPos.y
+        };
+        dragStartPos = currentWorld;
+
+        if (transformState.box && transformState.boxStartCx !== undefined) {
+            transformState.boxStartCx += delta.x;
+            transformState.boxStartCy += delta.y;
+            transformState.box.cx = transformState.boxStartCx;
+            transformState.box.cy = transformState.boxStartCy;
+        }
+
+        for (const item of dragObjectsData) {
+            const obj = item.object;
+            moveObject(obj, delta);
+        }
+
+        if (selectedObjectsSet.size > 0) {
+            updateSelectionInfo();
+        }
+        return;
+    }
+    if (tool === "select" && isSelecting) {
+        const mouseWorld = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+
+        if (selectionShapeMode === 'rect' && selectionRect) {
+            selectionRect.endX = mouseWorld.x;
+            selectionRect.endY = mouseWorld.y;
+            updateSelectionFromRect();
+        }
+        else if (selectionShapeMode === 'lasso') {
+            const lastPt = lassoPoints[lassoPoints.length - 1];
+            if (v2sqrmag(mouseWorld, lastPt) > 0.0000001) {
+                lassoPoints.push(mouseWorld);
+                updateSelectionFromLasso();
+            }
+        }
+    } if (tool === "brush" && isDrawingBrush) {
+        let mousePos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+        let lastPoint = brushPoints[brushPoints.length - 1];
+        if (v2sqrmag(mousePos, lastPoint) > 0.0000001) {
+            brushPoints.push(mousePos);
+        }
+    } if (tool === "shapes" && freeShapeState.active && freeShapeState.points.length > 0) {
+        let mousePos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+        let lastPoint = freeShapeState.points[freeShapeState.points.length - 1];
+        if (v2sqrmag(mousePos, lastPoint) > 0.0000001) {
+            freeShapeState.points.push(mousePos);
+        }
+    }
+};
+
+canvas.onpointerup = (e) => {
+    if (e.pointerType === 'touch') {
+        activeTouches.delete(e.pointerId);
+        clearTimeout(longPressTimeout);
+
+        if (isTouchGesturing) {
+            if (activeTouches.size === 0) {
+                setTimeout(() => isTouchGesturing = false, 50);
+            }
+            return;
+        }
+    }
+
+    if (e.button === 2) {
+        dragging = false;
+        //console.log("drag end");
+    }
+
+    if (e.button === 0) {
+
+        if (typeof isRefFreeMove !== 'undefined' && isRefFreeMove && typeof refTransformState !== 'undefined' && refTransformState.action) {
+            refTransformState.action = null;
+            return;
+        }
+
+        if (tool === "text" && textToolState.action) {
+            textToolState.action = null;
+        }
+        if (tool === "shapes" && shapesToolState.action) {
+            shapesToolState.action = null;
+        }
+        isHatchDragging = false;
+        isFillDragging = false;
+
+        if (tool === "hatch" && hatchVertexDragIndex !== -1) {
+            const dragResult = endHatchVertexDrag();
+            if (!dragResult.wasMoved) {
+                if (!dragResult.isNew) {
+                    const clickPos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+                    addHatchPoint(clickPos, false);
+                }
+            }
+        }
+        if (tool === "fill" && fillVertexDragIndex !== -1) {
+            const dragResult = endFillVertexDrag();
+            if (!dragResult.wasMoved && !dragResult.isNew) {
+                const clickPos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+                addFillPoint(clickPos, false);
+            }
+        }
+        if (arrowPulling === true) {
+            arrowPulling = false;
+            if (selectedId != null) showInfo(selectedId);
+        } if (isPullingCenter) {
+            isPullingCenter = false;
+            const object = objects.get(selectedId);
+
+            if (object) {
+                pushEvent("move_multiple", {
+                    objectsData: [{
+                        id: selectedId,
+                        prevData: centerPullStartData,
+                        newData: getObjectMoveData(object)
+                    }]
+                });
+                showInfo(selectedId);
+            }
+        } else if (arrowPulling === true) {
+            arrowPulling = false;
+            if (selectedId != null) showInfo(selectedId);
+        } else if (tool === "curve" && isDrawingCurve) {
+            isDrawingCurve = false;
+
+            if (snapping || mobileSnappingActive) {
+                let snapRad = (mobileSnappingActive && !snapping) ? 40 : Infinity;
+                const snapP = snappingPos(mousePos, snapRad);
+                if (snapP != null) {
+                    curvePoints[curvePoints.length - 1] = snapP;
+                }
+            }
+
+            finishCurve();
+        } else if (tool === "brush" && isDrawingBrush) {
+            isDrawingBrush = false;
+
+            if (snapping || mobileSnappingActive) {
+                let snapRad = (mobileSnappingActive && !snapping) ? 40 : Infinity;
+                const snapP = snappingPos(mousePos, snapRad);
+                if (snapP != null) {
+                    brushPoints[brushPoints.length - 1] = snapP;
+                    if (snapP.snapInfo) {
+                        brushEndSnapInfo = snapP.snapInfo;
+                    }
+                }
+            }
+
+            finishBrush();
+        } else if (tool === "shapes" && freeShapeState.active && freeShapeState.points.length > 0) {
+            finishFreeShape();
+        }
+        else {
+            if (!(snapping || mobileSnappingActive))
+                endDrawing(v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY)));
+            else {
+                let snapRad = (mobileSnappingActive && !snapping) ? 40 : Infinity;
+                const snapPos = snappingPos(v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY)), snapRad);
+                if (snapPos != null)
+                    endDrawing(snapPos);
+                else
+                    endDrawing(v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY)));
+            }
+        }
+        if (isDraggingSelected) {
+            const endPos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+            const totalDelta = {
+                x: endPos.x - (dragStartPos ? dragStartPos.x : 0),
+                y: endPos.y - (dragStartPos ? dragStartPos.y : 0)
+            };
+
+            if (dragObjectsData && dragObjectsData.length > 0) {
+                pushEvent("move_multiple", {
+                    objectsData: dragObjectsData.map(item => ({
+                        id: item.id,
+                        prevData: item.startData,
+                        newData: getObjectMoveData(item.object)
+                    }))
+                });
+            }
+
+            isDraggingSelected = false;
+            dragStartPos = null;
+            dragObjectsData = null;
+            return;
+        }
+        if (tool === "select" && isSelecting) {
+            isSelecting = false;
+
+            if (selectionShapeMode === 'rect') {
+                if (selectionRect &&
+                    Math.abs(selectionRect.endX - selectionRect.startX) < 0.002 &&
+                    Math.abs(selectionRect.endY - selectionRect.startY) < 0.002) {
+                    clearSelection();
+                    updateSelectionInfo();
+                }
+                selectionRect = null;
+            }
+            else if (selectionShapeMode === 'lasso') {
+                if (lassoPoints.length < 3) {
+                    clearSelection();
+                    updateSelectionInfo();
+                } else {
+                    updateSelectionFromLasso();
+                }
+                lassoPoints = [];
+            }
+        }
+        if (tool === "select" && transformState.active) {
+            pushEvent("move_multiple", {
+                objectsData: transformState.initialData.map(item => ({
+                    id: item.id,
+                    prevData: item.startData,
+                    newData: getObjectMoveData(item.object)
+                }))
+            });
+
+            transformState.active = false;
+            transformState.action = null;
+            transformState.initialData = [];
+
+            if (transformState.box) {
+                transformState.selectedIdsHash = Array.from(selectedObjectsSet).sort().join(',');
+            }
+            return;
+        }
+        //console.log("drawing end");
+    }
+};
+
+canvas.onpointercancel = (e) => {
+    if (e.pointerType === 'touch') {
+        activeTouches.delete(e.pointerId);
+        clearTimeout(longPressTimeout);
+        if (activeTouches.size === 0) isTouchGesturing = false;
+    }
+};
+
+// Zooming
+
+onwheel = (e) => {
+    if (!canvasHover) return;
+
+    const zoomIn = e.deltaY < 0;
+
+    if (zoomIn) {
+        screenZoom *= 1.1;
+    }
+    else {
+        screenZoom /= 1.1;
+        if (screenZoom <= 0.1) screenZoom = 0.1;
+    }
+
+    //console.log("Zoom: " + screenZoom);
+};
+
+let clipboardObjects = [];
+let contextMenuEl = null;
+let contextMenuOpenedAtCanvasPos = null;
+
+function getSelectedObjectsIds() {
+    if (typeof selectedObjectsSet !== 'undefined' && selectedObjectsSet.size > 0) {
+        return Array.from(selectedObjectsSet);
+    }
+    if (typeof selectedId !== 'undefined' && selectedId !== null && objects.has(selectedId)) {
+        return [selectedId];
+    }
+    return [];
+}
+
+function isValidCanvasObject(obj) {
+    if (!obj || typeof obj !== "object") return false;
+    if (obj.type === "line") {
+        return obj.start && obj.end &&
+            typeof obj.start.x === "number" && typeof obj.start.y === "number" &&
+            typeof obj.end.x === "number" && typeof obj.end.y === "number";
+    }
+    if (obj.type === "quad") {
+        return ["pos1", "pos2", "pos3", "pos4"].every(k =>
+            obj[k] && typeof obj[k].x === "number" && typeof obj[k].y === "number"
+        );
+    }
+    return false;
+}
+
+function getObjectPoints(obj) {
+    return obj.type === "line"
+        ? [obj.start, obj.end]
+        : [obj.pos1, obj.pos2, obj.pos3, obj.pos4];
+}
+
+function hasValidClipboard() {
+    return clipboardObjects.some(obj => isValidCanvasObject(obj));
+}
+
+function getObjectsCenter(objsArray) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const obj of objsArray) {
+        for (const p of getObjectPoints(obj)) {
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+        }
+    }
+
+    if (minX === Infinity) return { x: 0, y: 0 };
+
+    return { x: minX + (maxX - minX) / 2, y: minY + (maxY - minY) / 2 };
+}
+
+function copySelectedObjects() {
+    const ids = getSelectedObjectsIds();
+    if (ids.length === 0) return false;
+
+    clipboardObjects = ids
+        .map(id => objects.get(id))
+        .filter(obj => isValidCanvasObject(obj))
+        .map(obj => JSON.parse(JSON.stringify(obj)));
+
+    if (clipboardObjects.length > 0) {
+        showNotification(lang.ctxCopiedNotif + clipboardObjects.length);
+        return true;
+    }
+    return false;
+}
+
+
+function pasteObjectsAtCenter(targetWorldPos) {
+    if (!clipboardObjects || clipboardObjects.length === 0) return;
+
+    const validObjects = clipboardObjects.filter(obj => isValidCanvasObject(obj));
+    if (validObjects.length === 0) return;
+
+    const clipboardCenter = getObjectsCenter(validObjects);
+    const delta = {
+        x: targetWorldPos.x - clipboardCenter.x,
+        y: targetWorldPos.y - clipboardCenter.y
+    };
+
+    const newObjectsForEvent = [];
+    const newIds = [];
+
+    for (const srcObj of validObjects) {
+        const objIdStr = nextId().toString();
+        const obj = JSON.parse(JSON.stringify(srcObj));
+        obj.selected = false;
+
+        if (obj.type === "line") {
+            obj.name = lang.line + " " + objIdStr;
+        } else if (obj.type === "quad") {
+            obj.name = lang.quad + " " + objIdStr;
+        }
+
+        moveObject(obj, delta);
+
+        objects.set(objIdStr, obj);
+        newObjectsForEvent.push({ id: objIdStr, object: obj });
+        newIds.push(objIdStr);
+    }
+
+    if (newObjectsForEvent.length > 0) {
+        pushEvent("add_multiple", newObjectsForEvent);
+    }
+
+    refreshObjectsList(true);
+
+    if (typeof selectObjectsByIds === 'function') {
+        selectObjectsByIds(newIds);
+    }
+
+    showNotification(lang.ctxPastedNotif + newIds.length);
+}
+
+function openExportSightModal() {
+    if (typeof openModal === 'function') {
+        openModal();
+        return;
+    }
+
+    const modal = document.getElementById('exportModal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function getContextMenuElement() {
+    const menu = document.getElementById('canvasContextMenu');
+    if (!menu) return null;
+
+    if (!menu.dataset.bound) {
+        menu.addEventListener('click', (e) => {
+            const btn = e.target.closest('.ctx-menu-item');
+            if (!btn || btn.disabled) return;
+
+            const action = btn.getAttribute('data-action');
+            handleContextMenuAction(action);
+            hideContextMenu();
+        });
+
+        menu.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        menu.dataset.bound = 'true';
+    }
+
+    return menu;
+}
+
+function handleContextMenuAction(action) {
+    switch (action) {
+        case 'delete': {
+            deleteCurrentSelection();
+            break;
+        }
+        case 'copy': {
+            copySelectedObjects();
+            break;
+        }
+        case 'paste': {
+            const target = contextMenuOpenedAtCanvasPos || { x: screenPos.x, y: screenPos.y };
+            pasteObjectsAtCenter(target);
+            break;
+        }
+        case 'undo': {
+            if (typeof popEvent === 'function') popEvent();
+            break;
+        }
+        case 'redo': {
+            if (typeof popRedo === 'function') popRedo();
+            break;
+        }
+        case 'save': {
+            forcedSave();
+            showNotification(lang.savedNotificationText);
+            break;
+        }
+        case 'export': {
+            openExportSightModal();
+            break;
+        }
+    }
+}
+
+function setMenuItemEnabled(btn, enabled) {
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.toggle('ctx-menu-item-disabled', !enabled);
+}
+
+function updateContextMenuState() {
+    if (!contextMenuEl) return;
+
+    const hasSelection = getSelectedObjectsIds().length > 0;
+    const hasClipboard = hasValidClipboard();
+    const canUndo = typeof events !== 'undefined' && events.length > 0;
+    const canRedo = typeof redoEvents !== 'undefined' && redoEvents.length > 0;
+
+    const deleteBtn = contextMenuEl.querySelector('[data-action="delete"]');
+    const copyBtn = contextMenuEl.querySelector('[data-action="copy"]');
+    const pasteBtn = contextMenuEl.querySelector('[data-action="paste"]');
+    const undoBtn = contextMenuEl.querySelector('[data-action="undo"]');
+    const redoBtn = contextMenuEl.querySelector('[data-action="redo"]');
+
+    if (deleteBtn) deleteBtn.style.display = hasSelection ? 'flex' : 'none';
+    if (copyBtn) copyBtn.style.display = hasSelection ? 'flex' : 'none';
+
+    setMenuItemEnabled(pasteBtn, hasClipboard);
+    setMenuItemEnabled(undoBtn, canUndo);
+    setMenuItemEnabled(redoBtn, canRedo);
+}
+
+function showContextMenu(clientX, clientY, worldPos) {
+    if (!contextMenuEl) {
+        contextMenuEl = getContextMenuElement();
+    }
+    if (!contextMenuEl) return;
+
+    updateContextMenuState();
+
+    contextMenuOpenedAtCanvasPos = worldPos;
+
+    contextMenuEl.style.visibility = 'hidden';
+    contextMenuEl.style.display = 'flex';
+
+    const menuRect = contextMenuEl.getBoundingClientRect();
+    const margin = 6;
+
+    let left = clientX;
+    let top = clientY;
+
+    if (left + menuRect.width + margin > window.innerWidth) {
+        left = window.innerWidth - menuRect.width - margin;
+    }
+    if (top + menuRect.height + margin > window.innerHeight) {
+        top = window.innerHeight - menuRect.height - margin;
+    }
+    left = Math.max(margin, left);
+    top = Math.max(margin, top);
+
+    contextMenuEl.style.left = left + 'px';
+    contextMenuEl.style.top = top + 'px';
+    contextMenuEl.style.visibility = 'visible';
+
+    document.addEventListener('pointerdown', onDocPointerDownCloseMenu, true);
+    window.addEventListener('blur', hideContextMenu);
+    window.addEventListener('resize', hideContextMenu);
+}
+
+function hideContextMenu() {
+    if (!contextMenuEl) return;
+    contextMenuEl.style.display = 'none';
+    contextMenuOpenedAtCanvasPos = null;
+
+    document.removeEventListener('pointerdown', onDocPointerDownCloseMenu, true);
+    window.removeEventListener('blur', hideContextMenu);
+    window.removeEventListener('resize', hideContextMenu);
+}
+
+function onDocPointerDownCloseMenu(e) {
+    if (contextMenuEl && !contextMenuEl.contains(e.target)) {
+        hideContextMenu();
+    }
+}
+
+function isContextMenuOpen() {
+    return !!(contextMenuEl && contextMenuEl.style.display === 'flex');
+}
+
+const CONTEXT_MENU_CLICK_TOLERANCE_PX = 5;
+let rmbDownClientPos = null;
+let rmbWasDrag = false;
+
+canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 2) return;
+    rmbDownClientPos = { x: e.clientX, y: e.clientY };
+    rmbWasDrag = false;
+}, true);
+
+canvas.addEventListener('pointermove', (e) => {
+    if (rmbDownClientPos === null) return;
+    const dx = e.clientX - rmbDownClientPos.x;
+    const dy = e.clientY - rmbDownClientPos.y;
+    if ((dx * dx + dy * dy) > (CONTEXT_MENU_CLICK_TOLERANCE_PX * CONTEXT_MENU_CLICK_TOLERANCE_PX)) {
+        rmbWasDrag = true;
+    }
+}, true);
+
+canvas.addEventListener('pointerup', (e) => {
+    if (e.button !== 2) return;
+
+    if (!rmbWasDrag) {
+        const worldPos = v2canvas2v2disposSight(getMousePos(e.offsetX, e.offsetY));
+        showContextMenu(e.clientX, e.clientY, worldPos);
+    }
+
+    rmbDownClientPos = null;
+    rmbWasDrag = false;
+}, true);
+
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && isContextMenuOpen()) {
+        hideContextMenu();
+    }
+});
+
+
+document.addEventListener('keydown', (e) => {
+    const activeElem = document.activeElement;
+    if (activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA' || activeElem.isContentEditable)) {
+        return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
+        if (getSelectedObjectsIds().length > 0) {
+            e.preventDefault();
+            copySelectedObjects();
+        }
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
+        if (hasValidClipboard()) {
+            e.preventDefault();
+            const target = { x: screenPos.x, y: screenPos.y };
+            pasteObjectsAtCenter(target);
+        }
+    }
+});
+
+function reconcileSelectionAfterHistoryChange() {
+    if (typeof selectedObjectsSet !== 'undefined' && selectedObjectsSet.size > 0) {
+        for (const id of Array.from(selectedObjectsSet)) {
+            if (!objects.has(id)) {
+                selectedObjectsSet.delete(id);
+            }
+        }
+    }
+
+    if (typeof selectedId !== 'undefined' && selectedId !== null && !objects.has(selectedId)) {
+        selectedId = null;
+    }
+
+    if (typeof updateTransformBoxFromSelection === 'function') {
+        if (selectedObjectsSet.size > 0) {
+            updateTransformBoxFromSelection();
+        } else if (typeof transformState !== 'undefined') {
+            transformState.box = null;
+            transformState.active = false;
+            transformState.action = null;
+            transformState.selectedIdsHash = "";
+        }
+    }
+
+    if (typeof updateSelectionInfo === 'function') updateSelectionInfo();
+}
+
+if (typeof popEvent === 'function') {
+    const originalPopEvent = popEvent;
+    popEvent = function (...args) {
+        const result = originalPopEvent.apply(this, args);
+        reconcileSelectionAfterHistoryChange();
+        return result;
+    };
+}
+
+if (typeof popRedo === 'function') {
+    const originalPopRedo = popRedo;
+    popRedo = function (...args) {
+        const result = originalPopRedo.apply(this, args);
+        reconcileSelectionAfterHistoryChange();
+        return result;
+    };
+}
