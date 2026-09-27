@@ -306,6 +306,7 @@ const ru =
     hotkeyLinesTool: "Инструмент Линии",
     hotkeyCurveTool: "Инструмент Кривая",
     hotkeyBrushTool: "Инструмент Кисть",
+    hotkeyEraserTool: "Инструмент Ластик",
     hotkeyHatchTool: "Инструмент Штриховка",
     hotkeyFillTool: "Инструмент Заливки",
     hotkeySelectTool: "Инструмент Выделение",
@@ -340,7 +341,11 @@ const ru =
     updaterUpdateNow: "Обновить",
     updaterDownloading: "Загрузка...",
     updaterError: "Ошибка проверки обновлений",
-    updaterBannerText: "Доступно обновление"
+    updaterBannerText: "Доступно обновление",
+
+    eraserTitleText: "Ластик",
+    eraserDescription: "Проведите по холсту, чтобы стереть линии или четырёхугольники",
+    eraserThicknessLabel: "Толщина ластика"
 };
 
 const en =
@@ -652,6 +657,7 @@ const en =
     hotkeyLinesTool: "Lines Tool",
     hotkeyCurveTool: "Curve Tool",
     hotkeyBrushTool: "Brush Tool",
+    hotkeyEraserTool: "Eraser Tool",
     hotkeyHatchTool: "Hatch Tool",
     hotkeyFillTool: "Fill Tool",
     hotkeySelectTool: "Select Tool",
@@ -686,7 +692,11 @@ const en =
     updaterUpdateNow: "Update",
     updaterDownloading: "Downloading...",
     updaterError: "Update check failed",
-    updaterBannerText: "Update available"
+    updaterBannerText: "Update available",
+
+    eraserTitleText: "Eraser",
+    eraserDescription: "Drag across the canvas to erase lines or quads",
+    eraserThicknessLabel: "Eraser thickness"
 };
 
 const langDependent =
@@ -960,7 +970,11 @@ const langDependent =
 
         "sightsFolderPathTitle",
         "changeSightsPathBtn",
-        "appVersionLabel"
+        "appVersionLabel",
+
+        "eraserTitleText",
+        "eraserDescription",
+        "eraserThicknessLabel"
     ];
 
 function changeLang(to) {

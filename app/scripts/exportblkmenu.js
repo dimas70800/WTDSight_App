@@ -247,7 +247,6 @@ function saveBlkFile(content, fileName) {
             document.body.appendChild(saver);
         }
 
-
         saver.href = url;
         saver.download = sanitizeFileName(fileName) + '.blk';
         saver.click();
@@ -290,33 +289,37 @@ async function onGenerateBlkClick(saveAs = false) {
         let blk = generateBlkContent(settings);
         blk = addDrawingObjectsToBlk(blk);
         const fileName = getFileName().trim().replaceAll(" ", '_');
+        const safeName = sanitizeFileName(fileName) + '.blk';
 
-        const suggestedName = sanitizeFileName(fileName);
-
-        if (saveAs && window.showSaveFilePicker) {
-            const handle = await window.showSaveFilePicker({
-                suggestedName: suggestedName,
-                types: [{
-                    accept: { 'text/plain': ['.blk'] },
-                }],
+        if (saveAs) {
+            const result = await window.electronAPI.showSaveDialog({
+                title: 'Сохранить прицел как .blk',
+                fileName: safeName,
+                filters: [{ name: 'BLK файлы', extensions: ['blk'] }],
+                data: blk
             });
-            
-            const writable = await handle.createWritable();
-            await writable.write(blk);
-            await writable.close();
-            closeModal();
-        } else {
-            if (saveBlkFile(blk, fileName)) {
+            if (!result.canceled) {
                 closeModal();
+                showNotification('Файл сохранён');
+            }
+        } else {
+            const settingsObj = loadSettings();
+            let folderPath = settingsObj.sightsFolderPath;
+            if (!folderPath) {
+                folderPath = await window.electronAPI.getDocumentsPath();
+            }
+            const result = await window.electronAPI.saveFileToFolder(folderPath, safeName, blk);
+            if (result.success) {
+                closeModal();
+                showNotification('Файл сохранён в ' + result.fullPath);
+            } else {
+                showNotification('Ошибка сохранения: ' + result.error, true);
             }
         }
     } catch (error) {
-        if (error.name === 'AbortError') {
-            return;
-        }
-        
+        if (error.name === 'AbortError') return;
         console.error('Ошибка при генерации BLK:', error);
-        alert('Ошибка при генерации BLK: ' + error.message);
+        showNotification('Ошибка: ' + error.message, true);
     }
 }
 

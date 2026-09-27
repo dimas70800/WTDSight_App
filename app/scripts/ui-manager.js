@@ -19,7 +19,8 @@ function loadSettings() {
         canvasBgColor: '#c7c7c7',
         drawGrid: true,
         drawCrosshair: true,
-        oldSelection: false
+        oldSelection: false,
+        sightsFolderPath: ''
     };
 }
 
@@ -35,6 +36,7 @@ function saveAllSettings() {
         const drawCrosshairEl = document.getElementById('drawCrosshairCheckBox');
         const canvasBgColorEl = document.getElementById('canvasBgColor');
         const oldSelectionEl = document.getElementById('oldSelectionCheckBox');
+        const pathInput = document.getElementById('sightsFolderPathInput');
 
         if (!hintsEl || !outlineEl || !drawGridEl || !canvasBgColorEl) return;
 
@@ -46,7 +48,8 @@ function saveAllSettings() {
             canvasBgColor: canvasBgColorEl.value,
             drawGrid: drawGridEl.checked,
             drawCrosshair: drawCrosshairEl.checked,
-            oldSelection: oldSelectionEl.checked
+            oldSelection: oldSelectionEl.checked,
+            sightsFolderPath: pathInput ? pathInput.value : ''
         };
 
         localStorage.setItem('wtdsight-settings', JSON.stringify(settings));
@@ -95,6 +98,11 @@ function applyAllSettings(settings) {
         oldSelectionEl.checked = settings.oldSelection || false;
         oldSelectionEl.addEventListener('change', saveAllSettings);
     }
+
+    const pathInput = document.getElementById('sightsFolderPathInput');
+    if (pathInput) {
+        pathInput.value = settings.sightsFolderPath || '';
+    }
 }
 
 function togglePanel(forceState) {
@@ -129,6 +137,7 @@ const defaultHotkeys = {
     actionLinesTool:{ code: 'KeyL',   ctrl: false, alt: false, shift: false, descId: 'hotkeyLinesTool' },
     actionCurveTool:{ code: 'KeyC',   ctrl: false, alt: false, shift: false, descId: 'hotkeyCurveTool' },
     actionBrushTool:{ code: 'KeyB',   ctrl: false, alt: false, shift: false, descId: 'hotkeyBrushTool' },
+    actionEraserTool:{ code: 'KeyX',   ctrl: false, alt: false, shift: false, descId: 'hotkeyEraserTool' },
     actionHatchTool:{ code: 'KeyH',   ctrl: false, alt: false, shift: false, descId: 'hotkeyHatchTool' },
     actionFillTool:{ code: 'KeyF',   ctrl: false, alt: false, shift: false, descId: 'hotkeyFillTool' },
     actionSelectTool:{ code: 'KeyS',   ctrl: false, alt: false, shift: false, descId: 'hotkeySelectTool' }
@@ -420,9 +429,37 @@ window.onerror = function () { return true; };
 const originalAlert = window.alert;
 window.alert = function (msg) { showNotification(msg); };
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
     const settings = loadSettings();
+    if (!settings.sightsFolderPath) {
+        try {
+            const docsPath = await window.electronAPI.getDocumentsPath();
+            settings.sightsFolderPath = docsPath;
+            localStorage.setItem('wtdsight-settings', JSON.stringify(settings));
+        } catch (e) {
+            console.warn('Не удалось получить путь к документам:', e);
+        }
+    }
     applyAllSettings(settings);
+});
+
+document.getElementById('changeSightsPathBtn')?.addEventListener('click', async () => {
+    try {
+        const result = await window.electronAPI.showOpenDialog({
+            title: 'Выберите папку для сохранения прицелов',
+            defaultPath: document.getElementById('sightsFolderPathInput').value || undefined
+        });
+        if (!result.canceled && result.filePath) {
+            const settings = loadSettings();
+            settings.sightsFolderPath = result.filePath;
+            localStorage.setItem('wtdsight-settings', JSON.stringify(settings));
+            document.getElementById('sightsFolderPathInput').value = result.filePath;
+            showNotification('Путь обновлён');
+            saveAllSettings();
+        }
+    } catch (e) {
+        showNotification('Ошибка выбора папки', true);
+    }
 });
 
 function toggleSightPreview() {
@@ -631,44 +668,24 @@ async function takePreviewScreenshot(saveAs = false) {
     const textPadding = 30;
     const watermarkText = "Made with WTDSight by dimas7080";
     tCtx.fillText(watermarkText, tempCanvas.width - textPadding, tempCanvas.height - textPadding);
-
+    
+    const dataUrl = tempCanvas.toDataURL('image/png');
     const defaultFileName = `WTDSight_Preview_${new Date().toISOString().slice(0, 19).replace(/:/g, '-').replace('T', '_')}.png`;
 
-    if (saveAs && window.showSaveFilePicker) {
-        try {
-            const handle = await window.showSaveFilePicker({
-                suggestedName: defaultFileName,
-                types: [{
-                    accept: { 'image/png': ['.png'] },
-                }],
-            });
-            
-            const writable = await handle.createWritable();
-            tempCanvas.toBlob(async (blob) => {
-                await writable.write(blob);
-                await writable.close();
-            }, 'image/png');
-        } catch (err) {
-            showNotification("Сохранение отменено.", true);
+    try {
+        const result = await window.electronAPI.showSaveDialog({
+            title: 'Сохранить скриншот',
+            fileName: defaultFileName,
+            filters: [{ name: 'PNG изображения', extensions: ['png'] }],
+            data: dataUrl
+        });
+        if (!result.canceled) {
+            showNotification('Скриншот сохранён');
         }
-    } else {
-        try {
-            const dataURL = tempCanvas.toDataURL('image/png');
-            const link = document.createElement('a');
-            link.download = defaultFileName;
-            link.href = dataURL;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        } catch (e) {
-            console.error("Ошибка при сохранении скриншота:", e);
-            if (typeof showNotification === 'function') {
-                showNotification("Не удалось сохранить скриншот.", true);
-            } else {
-                alert("Не удалось сохранить скриншот.");
-            }
-        }
+    } catch (e) {
+        showNotification('Ошибка сохранения', true);
     }
+
 }
 
 function changePreviewBackground() {
