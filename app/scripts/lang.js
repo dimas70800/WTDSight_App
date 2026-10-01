@@ -19,6 +19,8 @@ const ru =
     toolsLinesButton: "Линии",
     toolsQuadsButton: "Четырёхугольники",
     opacityTitle: "Непрозрачность",
+    layersTitle: "Слои",
+    selectAllLayersLabel: "Выбрать все",
     objectsTitle: "Объекты",
 
     selObjectTitle: "Выбранный объект",
@@ -216,6 +218,7 @@ const ru =
     brushThicknessLabel: "Толщина",
     brushSimplificationLabel: "Упрощение",
     brushSmoothingLabel: "Сглаживание",
+    brushStraightLinesLabel: "Создавать прямые линии",
 
     playAnimationBtn: "▶ Анимация рисования",
     stopAnimationBtn: "⏹ Остановить анимацию",
@@ -371,6 +374,8 @@ const en =
     toolsLinesButton: "Lines",
     toolsQuadsButton: "Quads",
     opacityTitle: "Opacity",
+    layersTitle: "Layers",
+    selectAllLayersLabel: "Select All",
     objectsTitle: "Objects",
 
     selObjectTitle: "Selected object",
@@ -569,6 +574,7 @@ const en =
     brushThicknessLabel: "Thickness",
     brushSimplificationLabel: "Simplification",
     brushSmoothingLabel: "Smoothing",
+    brushStraightLinesLabel: "Creating straight lines",
 
     playAnimationBtn: "▶ Drawing animation",
     stopAnimationBtn: "⏹ Stop animation",
@@ -724,6 +730,7 @@ const langDependent =
         //"toolsLinesButton",
         //"toolsQuadsButton",
         "opacityTitle",
+        "layersTitle",
         "objectsTitle",
 
         "selObjectTitle",
@@ -878,6 +885,7 @@ const langDependent =
         "brushThicknessLabel",
         "brushSimplificationLabel",
         "brushSmoothingLabel",
+        "brushStraightLinesLabel",
 
         "playAnimationBtn",
         "speedAnimationLabel",
@@ -1017,6 +1025,7 @@ function changeLang(to) {
     if (archiveFileNameInput) archiveFileNameInput.placeholder = lang.archiveFileNamePlaceholder;
 
     showInfo(selectedId);
+    if (typeof renderLayersUI === 'function') renderLayersUI();
 
     if (typeof saveAllSettings === 'function') {
         saveAllSettings();
