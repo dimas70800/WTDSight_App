@@ -507,8 +507,52 @@ function generateFillQuads(points) {
         return pos === 4 || neg === 4;
     }
 
+    function isPolygonConvex(p) {
+        if (p.length < 3) return false;
+        let sign = 0;
+        const n = p.length;
+        for (let i = 0; i < n; i++) {
+            const cr = cross(p[i], p[(i + 1) % n], p[(i + 2) % n]);
+            if (Math.abs(cr) < 1e-9) continue;
+            if (sign === 0) sign = cr > 0 ? 1 : -1;
+            else if ((cr > 0 ? 1 : -1) !== sign) return false;
+        }
+        return true;
+    }
+
+    function quadrangulateConvex(p) {
+        const n = p.length;
+        if (n < 3) return [];
+        if (n === 3) return [[p[0], p[1], p[2], p[2]]];
+        if (n === 4 && isConvex4(p)) return [p];
+
+        let workPts = [...p];
+        let area = 0;
+        for (let i = 0; i < n; i++) {
+            const j = (i + 1) % n;
+            area += workPts[i].x * workPts[j].y - workPts[j].x * workPts[i].y;
+        }
+        if (area < 0) workPts.reverse();
+
+        const quads = [];
+        let i = 0, last = n - 1;
+        while (last - i >= 3) {
+            if (last - i === 3) {
+                quads.push([workPts[i], workPts[i + 1], workPts[i + 2], workPts[last]]);
+                break;
+            }
+            quads.push([workPts[i], workPts[i + 1], workPts[i + 2], workPts[last]]);
+            i += 2;
+        }
+        if (last - i === 2) {
+            quads.push([workPts[i], workPts[i + 1], workPts[last], workPts[last]]);
+        }
+        return quads;
+    }
+
     if (pts.length === 3) return [[pts[0], pts[1], pts[2], pts[2]]];
     if (pts.length === 4 && isConvex4(pts)) return [pts];
+    if (isPolygonConvex(pts)) return quadrangulateConvex(pts);
 
     let triangles = [];
     const earcutFn = (typeof earcut !== 'undefined' ? (earcut.default || earcut) : null);
@@ -517,6 +561,10 @@ function generateFillQuads(points) {
             const flat = [];
             for (let p of pts) flat.push(p.x, p.y);
             const indices = earcutFn(flat, null, 2);
+            const refineFn = (typeof earcut !== 'undefined' && earcut.refine) ? earcut.refine : (earcutFn && earcutFn.refine);
+            if (refineFn && indices && indices.length) {
+                refineFn(indices, flat, 2);
+            }
             for (let i = 0; i < indices.length; i += 3) {
                 triangles.push([pts[indices[i]], pts[indices[i + 1]], pts[indices[i + 2]]]);
             }

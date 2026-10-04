@@ -341,6 +341,10 @@ function triangulatePolygonWithEarcut(outer, holes, earcutFn) {
     let indices;
     try {
         indices = earcutFn(vertices, holeIndices, 2);
+        const refineFn = (typeof earcut !== 'undefined' && earcut.refine) ? earcut.refine : (earcutFn && earcutFn.refine);
+        if (refineFn && indices && indices.length) {
+            refineFn(indices, vertices, 2);
+        }
     } catch (e) {
         console.error('Earcut triangulation error:', e);
         return [];
