@@ -270,6 +270,8 @@ const ru =
     refFreeMoveLabel: "Свободное перемещение",
 
     replaceObjectsLabel: "Заменять обьекты",
+    optimizeSightButton: "Оптимизировать",
+    optimizeSightButtonLoading: "Оптимизация...",
 
     mirrorLabel: "Отражение",
     previewColorText: "Цвет прицела:",
@@ -628,6 +630,8 @@ const en =
     refFreeMoveLabel: "Free transform",
 
     replaceObjectsLabel: "Replace objects",
+    optimizeSightButton: "Optimize",
+    optimizeSightButtonLoading: "Optimizing...",
 
     mirrorLabel: "Mirror",
     previewColorText: "Sight Color:",
@@ -939,6 +943,7 @@ const langDependent =
         "refFreeMoveLabel",
 
         "replaceObjectsLabel",
+        "optimizeSightButton",
 
         "mirrorLabel",
         "previewColorText",
