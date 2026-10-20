@@ -3,6 +3,8 @@ const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const path = require('path');
 
+app.commandLine.appendSwitch('force_high_performance_gpu');
+
 let mainWindow;
 
 autoUpdater.autoDownload = true;
@@ -94,6 +96,12 @@ ipcMain.handle('get-documents-path', () => {
 
 ipcMain.handle('get-app-version', () => {
     return app.getVersion();
+});
+
+ipcMain.handle('read-app-file', async (event, relPath) => {
+    const fullPath = path.join(__dirname, '..', 'app', relPath);
+    const buf = await fs.promises.readFile(fullPath);
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 });
 
 function getDiskAutosavePath() {

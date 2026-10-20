@@ -7,6 +7,8 @@ const ru =
     shiftRefTitle: "Смещение картинки",
     refOpacityTitle: "Непрозрачность картинки",
     refOpacityTitleShared: "Непрозрачность картинки",
+    refEnhanceBtn: "Улучшить фото",
+    refEnhanceDone: "Уже улучшено",
     exportButton: "Экспортировать прицел как .txt",
     exportButtonBlk: "Экспортировать прицел как .blk",
 
@@ -370,6 +372,8 @@ const en =
     shiftRefTitle: "Image shift",
     refOpacityTitle: "Image opacity",
     refOpacityTitleShared: "Image opacity",
+    refEnhanceBtn: "Enhance photo",
+    refEnhanceDone: "Already enhanced",
     exportButton: "Export sight as .txt",
     exportButtonBlk: "Export sight as .blk",
 
@@ -1057,6 +1061,9 @@ function changeLang(to) {
     }
     if (typeof refreshUpdaterTexts === 'function') {
         refreshUpdaterTexts();
+    }
+    if (typeof updateRefEnhanceButtonState === 'function') {
+        updateRefEnhanceButtonState();
     }
 }
 

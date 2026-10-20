@@ -2,13 +2,15 @@ const referenceArray = [];
 for (let i = 0; i < 3; i++) {
     referenceArray.push({
         obj: null,
+        originalObj: null,
+        isEnhanced: false,
         size: 1,
         x: 0,
         y: 0,
         rotation: 0,
         opacity: 0.5,
         url: null,
-        filname: ""
+        fileName: ""
     });
 }
 
@@ -55,35 +57,57 @@ function setReferenceOpacityShared(value) {
     referenceArray[currentReference].opacity = parseFloat(value);
 }
 
-el("refFile").onchange = () => {
-    const fileInput = el("refFile");
-    const file = fileInput.files[0];
-    if (!file) return;
+function revokeReferenceBlobs(ref) {
+    if (!ref) return;
+    if (ref.obj && ref.obj.src && ref.obj.src.startsWith('blob:')) {
+        URL.revokeObjectURL(ref.obj.src);
+    }
+    if (ref.originalObj && ref.originalObj.src && ref.originalObj.src.startsWith('blob:') && ref.originalObj !== ref.obj) {
+        URL.revokeObjectURL(ref.originalObj.src);
+    }
+}
 
-    referenceArray[currentReference].fileName = file.name;
+const refFileInputElem = el("refFile");
+if (refFileInputElem) {
+    refFileInputElem.onchange = () => {
+        if (typeof abortCurrentEnhancement === 'function') abortCurrentEnhancement();
+        const file = refFileInputElem.files[0];
+        if (!file) return;
 
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-        referenceArray[currentReference].obj = img;
-        referenceArray[currentReference].url = null;
-        setReferenceMenu();
+        revokeReferenceBlobs(referenceArray[currentReference]);
+        referenceArray[currentReference].fileName = file.name;
+
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            referenceArray[currentReference].obj = img;
+            referenceArray[currentReference].originalObj = img;
+            referenceArray[currentReference].isEnhanced = false;
+            referenceArray[currentReference].url = null;
+            setReferenceMenu();
+        };
+        img.src = url;
     };
-    img.src = url;
-};
+}
 
 function setReferenceSrc(url) {
+    if (typeof abortCurrentEnhancement === 'function') abortCurrentEnhancement();
+    revokeReferenceBlobs(referenceArray[currentReference]);
     referenceArray[currentReference].fileName = "";
     const img = new Image();
     img.crossOrigin = "Anonymous";
     img.onload = () => {
         referenceArray[currentReference].obj = img;
+        referenceArray[currentReference].originalObj = img;
+        referenceArray[currentReference].isEnhanced = false;
         referenceArray[currentReference].url = url;
         setReferenceMenu();
     };
     img.onerror = () => {
         console.error("Failed to load image:", url);
         referenceArray[currentReference].obj = null;
+        referenceArray[currentReference].originalObj = null;
+        referenceArray[currentReference].isEnhanced = false;
         referenceArray[currentReference].url = null;
         setReferenceMenu();
     };
@@ -119,6 +143,8 @@ function setReferenceMenu() {
             fileNameSpan.textContent = "";
         }
     }
+
+    updateRefEnhanceButtonState();
 }
 
 let isRefFreeMove = false;
@@ -144,6 +170,11 @@ function getRefTransformBox() {
     };
 }
 
+let cachedWasmBuffer = null;
+let cachedModelBuffer = null;
+let isEnhancing = false;
+let currentUpscaleWorker = null;
+
 document.addEventListener('DOMContentLoaded', () => {
     const cb = document.getElementById('refFreeMoveCheckbox');
     if (cb) {
@@ -151,7 +182,222 @@ document.addEventListener('DOMContentLoaded', () => {
             isRefFreeMove = e.target.checked;
         });
     }
+    updateRefEnhanceButtonState();
 });
+
+async function loadLocalBinary(relPath) {
+    if (window.electronAPI && typeof window.electronAPI.readAppFile === 'function') {
+        const buf = await window.electronAPI.readAppFile(relPath);
+        return buf;
+    }
+    const res = await fetch(relPath);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to read ${relPath}`);
+    return await res.arrayBuffer();
+}
+
+function getRefEnhanceButtonText() {
+    const isEn = (typeof lang !== 'undefined' && lang === en);
+    return (typeof lang !== 'undefined' && lang.refEnhanceBtn) ? lang.refEnhanceBtn : (isEn ? "Enhance photo" : "Улучшить фото");
+}
+
+function updateRefEnhanceButtonState() {
+    const btn = el("refEnhanceBtn");
+    const txt = el("refEnhanceBtnText");
+    if (!btn || !txt) return;
+
+    if (isEnhancing) {
+        btn.disabled = true;
+        btn.style.opacity = "0.7";
+        btn.style.cursor = "wait";
+        return;
+    }
+
+    const ref = referenceArray[currentReference];
+    const hasImage = ref && ref.obj;
+
+    if (!hasImage) {
+        btn.disabled = true;
+        btn.style.opacity = "0.5";
+        btn.style.cursor = "not-allowed";
+        txt.textContent = getRefEnhanceButtonText();
+        return;
+    }
+
+    if (ref.isEnhanced) {
+        btn.disabled = true;
+        btn.style.opacity = "0.6";
+        btn.style.cursor = "default";
+        txt.textContent = (typeof lang !== 'undefined' && lang.refEnhanceDone) ? lang.refEnhanceDone : "Уже улучшено";
+        return;
+    }
+
+    btn.disabled = false;
+    btn.style.opacity = "1";
+    btn.style.cursor = "pointer";
+    txt.textContent = getRefEnhanceButtonText();
+}
+
+function abortCurrentEnhancement() {
+    if (currentUpscaleWorker) {
+        currentUpscaleWorker.terminate();
+        currentUpscaleWorker = null;
+    }
+    if (isEnhancing) {
+        isEnhancing = false;
+        updateRefEnhanceButtonState();
+    }
+}
+
+async function enhanceReferencePhoto() {
+    const ref = referenceArray[currentReference];
+    if (!ref || !ref.obj) return;
+    if (ref.isEnhanced || isEnhancing) return;
+
+    isEnhancing = true;
+    updateRefEnhanceButtonState();
+
+    const btnText = el("refEnhanceBtnText");
+    const isEn = (typeof lang !== 'undefined' && lang === en);
+    const enhanceLabel = isEn ? "Enhancing" : "Улучшение";
+    if (btnText) btnText.textContent = `${enhanceLabel}...`;
+
+    let srcCanvas = null;
+    let dstCanvas = null;
+
+    try {
+        if (!cachedWasmBuffer) {
+            cachedWasmBuffer = await loadLocalBinary('scripts/ort-wasm-simd-threaded.jsep.wasm');
+        }
+        if (!cachedModelBuffer) {
+            cachedModelBuffer = await loadLocalBinary('models/noise3_scale2x.onnx');
+        }
+
+        if (!isEnhancing) return;
+
+        const srcImg = ref.originalObj || ref.obj;
+        const sw = srcImg.naturalWidth || srcImg.width;
+        const sh = srcImg.naturalHeight || srcImg.height;
+        if (!sw || !sh) throw new Error("Invalid image dimensions");
+
+        srcCanvas = document.createElement("canvas");
+        srcCanvas.width = sw;
+        srcCanvas.height = sh;
+        const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+        srcCtx.drawImage(srcImg, 0, 0);
+        const srcPixels = srcCtx.getImageData(0, 0, sw, sh).data;
+        srcCanvas.width = 0;
+        srcCanvas.height = 0;
+        srcCanvas = null;
+
+        const scale = 2;
+        const dw = sw * scale;
+        const dh = sh * scale;
+
+        let activeDevice = 'GPU';
+
+        const workerResult = await new Promise((resolve, reject) => {
+            const worker = new Worker('scripts/ai-worker.js?v=' + Date.now());
+            currentUpscaleWorker = worker;
+
+            worker.onmessage = (e) => {
+                const msg = e.data;
+                if (!msg) return;
+
+                if (msg.type === 'init') {
+                    activeDevice = msg.device || ((msg.provider === 'webgpu') ? 'GPU' : 'CPU');
+                    if (btnText && isEnhancing) {
+                        btnText.textContent = `${enhanceLabel} (${activeDevice})...`;
+                    }
+                } else if (msg.type === 'progress') {
+                    if (btnText && isEnhancing) {
+                        btnText.textContent = `${enhanceLabel} (${activeDevice})... ${msg.pct}%`;
+                    }
+                } else if (msg.type === 'complete') {
+                    resolve(msg);
+                } else if (msg.type === 'error') {
+                    reject(new Error(msg.error));
+                }
+            };
+
+            worker.onerror = (err) => {
+                reject(new Error(err.message || "Worker execution failed"));
+            };
+
+            worker.postMessage({
+                action: 'enhance',
+                wasmBuffer: cachedWasmBuffer,
+                modelBuffer: cachedModelBuffer,
+                srcPixels: srcPixels,
+                sw: sw,
+                sh: sh
+            });
+        });
+
+        if (!isEnhancing) return;
+
+        dstCanvas = document.createElement("canvas");
+        dstCanvas.width = dw;
+        dstCanvas.height = dh;
+        const dstCtx = dstCanvas.getContext("2d", { willReadFrequently: true });
+        dstCtx.imageSmoothingEnabled = true;
+        dstCtx.imageSmoothingQuality = "high";
+        dstCtx.drawImage(srcImg, 0, 0, dw, dh);
+        const dstData = dstCtx.getImageData(0, 0, dw, dh);
+
+        const outRgb = workerResult.outRgb;
+        const totalPixels = dw * dh;
+        for (let i = 0; i < totalPixels; i++) {
+            const idx4 = i * 4;
+            const idx3 = i * 3;
+            dstData.data[idx4] = outRgb[idx3];
+            dstData.data[idx4 + 1] = outRgb[idx3 + 1];
+            dstData.data[idx4 + 2] = outRgb[idx3 + 2];
+        }
+        dstCtx.putImageData(dstData, 0, 0);
+
+        const blob = await new Promise((resolve) => dstCanvas.toBlob(resolve, "image/png"));
+        const blobUrl = URL.createObjectURL(blob);
+
+        const resultImg = new Image();
+        await new Promise((resolve, reject) => {
+            resultImg.onload = resolve;
+            resultImg.onerror = reject;
+            resultImg.src = blobUrl;
+        });
+
+        if (dstCanvas) { dstCanvas.width = 0; dstCanvas.height = 0; dstCanvas = null; }
+
+        if (!isEnhancing) {
+            URL.revokeObjectURL(blobUrl);
+            return;
+        }
+
+        if (ref.obj && ref.obj.src && ref.obj.src.startsWith('blob:') && ref.obj !== ref.originalObj) {
+            URL.revokeObjectURL(ref.obj.src);
+        }
+
+        ref.originalObj = srcImg;
+        ref.obj = resultImg;
+        ref.isEnhanced = true;
+
+        if (typeof render === 'function') render();
+    } catch (err) {
+        if (isEnhancing) {
+            alert((typeof lang !== 'undefined' && lang === en ? "Error enhancing photo: " : "Ошибка при улучшении фото: ") + err.message);
+        }
+    } finally {
+        if (srcCanvas) { srcCanvas.width = 0; srcCanvas.height = 0; srcCanvas = null; }
+        if (dstCanvas) { dstCanvas.width = 0; dstCanvas.height = 0; dstCanvas = null; }
+        if (currentUpscaleWorker) {
+            currentUpscaleWorker.terminate();
+            currentUpscaleWorker = null;
+        }
+        cachedWasmBuffer = null;
+        cachedModelBuffer = null;
+        isEnhancing = false;
+        updateRefEnhanceButtonState();
+    }
+}
 
 /*function calc()
 {

@@ -602,11 +602,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             else if (file.type.startsWith('image/')) {
                 if (typeof referenceArray !== 'undefined' && typeof currentReference !== 'undefined') {
+                    if (typeof abortCurrentEnhancement === 'function') abortCurrentEnhancement();
+                    if (typeof revokeReferenceBlobs === 'function') {
+                        revokeReferenceBlobs(referenceArray[currentReference]);
+                    }
                     referenceArray[currentReference].fileName = file.name;
                     const url = URL.createObjectURL(file);
                     const img = new Image();
                     img.onload = () => {
                         referenceArray[currentReference].obj = img;
+                        referenceArray[currentReference].originalObj = img;
+                        referenceArray[currentReference].isEnhanced = false;
                         referenceArray[currentReference].url = null;
                         
                         if (typeof setReferenceMenu === 'function') setReferenceMenu();

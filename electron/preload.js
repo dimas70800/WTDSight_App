@@ -19,7 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     autosaveWriteToDisk: (data) => ipcRenderer.invoke('autosave:write-to-disk', data),
-    autosaveReadFromDisk: () => ipcRenderer.invoke('autosave:read-from-disk')
+    autosaveReadFromDisk: () => ipcRenderer.invoke('autosave:read-from-disk'),
+    readAppFile: (relPath) => ipcRenderer.invoke('read-app-file', relPath)
 });
 
 window.addEventListener('DOMContentLoaded', () => {
