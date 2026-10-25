@@ -251,6 +251,7 @@ const ru =
     shareLinkTitle: "Ссылка на прицел (доступна 1 час)",
 
     boostyText: "Мой Boosty",
+    saveRefOnReloadLabel: "Сохранять референс при перезагрузке",
     oldSelectionLabel: "Старый режим выделения (по центру)",
 
     shapesTitleText: "Фигуры",
@@ -617,6 +618,7 @@ const en =
     shareLinkTitle: "Link to the sight (available for 1 hour)",
 
     boostyText: "My Boosty",
+    saveRefOnReloadLabel: "Save reference on reload",
     oldSelectionLabel: "Old selection mode (by center)",
 
     shapesTitleText: "Shapes",
@@ -934,6 +936,7 @@ const langDependent =
         "shareLinkTitle",
 
         "boostyText",
+        "saveRefOnReloadLabel",
         "oldSelectionLabel",
 
         "shapesTitleText",
