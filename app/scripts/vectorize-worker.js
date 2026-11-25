@@ -450,7 +450,7 @@ function processMessage(data) {
     }
 
     else if (type === 'auto_batch_quads') {
-        const { tests, target } = data;
+        const { tests, target, ignoreTransparency } = data;
 
         for (const t of tests) {
             try {
@@ -458,7 +458,8 @@ function processMessage(data) {
                     maxQuads: target,
                     blurRadius: t.blur,
                     threshold: t.thresh,
-                    denoiseEnabled: true
+                    denoiseEnabled: true,
+                    ignoreTransparency: !!ignoreTransparency
                 });
 
                 let singleCount = 0;
@@ -564,55 +565,8 @@ function resampleImageData(imageData, targetW, targetH) {
     return out;
 }
 
-function buildGridAndRectsQuads(imageData, targetW, targetH, cleanNoise, blurRadius, threshold) {
-    const data = resampleImageData(imageData, targetW, targetH);
-
-    const gray = new Float32Array(targetW * targetH);
-    const inverted = new Float32Array(targetW * targetH);
-
-    for (let i = 0; i < data.length; i += 4) {
-        const g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const idx = i / 4;
-        gray[idx] = g;
-        inverted[idx] = 255 - g;
-    }
-
-    const blurredInverted = boxBlurQuads(inverted, targetW, targetH, blurRadius);
-
-    const grid = [];
-    for (let y = 0; y < targetH; y++) {
-        grid[y] = new Uint8Array(targetW);
-    }
-
-    for (let y = 0; y < targetH; y++) {
-        for (let x = 0; x < targetW; x++) {
-            const idx = y * targetW + x;
-            const g = gray[idx];
-            const b = blurredInverted[idx];
-
-            let val;
-            const denom = 255 - b;
-
-            if (denom <= 0) {
-                val = (g < 128) ? 0 : 255;
-            } else {
-                val = (g * 255) / denom;
-            }
-
-            grid[y][x] = (val < threshold || g < 20) ? 1 : 0;
-        }
-    }
-
-    if (cleanNoise) {
-        for (let y = 1; y < targetH - 1; y++) {
-            for (let x = 1; x < targetW - 1; x++) {
-                if (grid[y][x] === 1) {
-                    const n = grid[y - 1][x] + grid[y + 1][x] + grid[y][x - 1] + grid[y][x + 1];
-                    if (n === 0) grid[y][x] = 0;
-                }
-            }
-        }
-    }
+function buildGridAndRectsQuads(imageData, targetW, targetH, cleanNoise, blurRadius, threshold, ignoreTransparency) {
+    const mask = buildBinaryMaskFlat(imageData, targetW, targetH, blurRadius, threshold, cleanNoise, ignoreTransparency);
 
     const rects = [];
     const visited = [];
@@ -621,18 +575,20 @@ function buildGridAndRectsQuads(imageData, targetW, targetH, cleanNoise, blurRad
     }
 
     for (let y = 0; y < targetH; y++) {
+        const rowOffset = y * targetW;
         for (let x = 0; x < targetW; x++) {
-            if (grid[y][x] === 1 && !visited[y][x]) {
+            if (mask[rowOffset + x] === 1 && !visited[y][x]) {
                 let width = 0;
-                while (x + width < targetW && grid[y][x + width] === 1 && !visited[y][x + width]) {
+                while (x + width < targetW && mask[rowOffset + x + width] === 1 && !visited[y][x + width]) {
                     width++;
                 }
 
                 let height = 1;
                 while (y + height < targetH) {
                     let canExtend = true;
+                    const nextRowOffset = (y + height) * targetW;
                     for (let k = 0; k < width; k++) {
-                        if (grid[y + height][x + k] !== 1 || visited[y + height][x + k]) {
+                        if (mask[nextRowOffset + x + k] !== 1 || visited[y + height][x + k]) {
                             canExtend = false;
                             break;
                         }
@@ -655,14 +611,18 @@ function buildGridAndRectsQuads(imageData, targetW, targetH, cleanNoise, blurRad
     return rects;
 }
 
-function buildBinaryMaskFlat(imageData, w, h, blurRadius, threshold, cleanNoise) {
+function buildBinaryMaskFlat(imageData, w, h, blurRadius, threshold, cleanNoise, ignoreTransparency) {
     const resampledData = resampleImageData(imageData, w, h);
     const data = resampledData;
     const gray = new Float32Array(w * h);
     const inverted = new Float32Array(w * h);
 
     for (let i = 0; i < data.length; i += 4) {
-        const g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        let g = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        if (!ignoreTransparency) {
+            const alpha = data[i + 3] / 255;
+            g = g * alpha + 255 * (1 - alpha);
+        }
         const idx = i / 4;
         gray[idx] = g;
         inverted[idx] = 255 - g;
@@ -1122,8 +1082,8 @@ function triangulateSmoothPolygon(outer, holes) {
     return quads;
 }
 
-function buildSmoothQuadsCore(imageData, w, h, blurRadius, threshold, cleanNoise) {
-    const mask = buildBinaryMaskFlat(imageData, w, h, blurRadius, threshold, cleanNoise);
+function buildSmoothQuadsCore(imageData, w, h, blurRadius, threshold, cleanNoise, ignoreTransparency) {
+    const mask = buildBinaryMaskFlat(imageData, w, h, blurRadius, threshold, cleanNoise, ignoreTransparency);
 
     if (!potracePlus || !potracePlus.Bitmap || !potracePlus.potraceGetPathList) {
         return [];
@@ -1176,8 +1136,9 @@ function buildSmoothQuadsForLimit(imageData, params) {
     const blurRadius = params.blurRadius;
     const threshold = params.threshold;
     const denoiseEnabled = params.denoiseEnabled;
+    const ignoreTransparency = !!params.ignoreTransparency;
 
-    let quads = buildSmoothQuadsCore(imageData, origW, origH, blurRadius, threshold, denoiseEnabled);
+    let quads = buildSmoothQuadsCore(imageData, origW, origH, blurRadius, threshold, denoiseEnabled, ignoreTransparency);
     let isAutoOptimized = false;
 
     let currentW = origW, currentH = origH;
@@ -1187,7 +1148,7 @@ function buildSmoothQuadsForLimit(imageData, params) {
         const factor = Math.sqrt(maxQuadsLimit / quads.length) * 0.95;
         currentW = Math.max(64, Math.floor(currentW * factor));
         currentH = Math.max(64, Math.floor(currentH * factor));
-        quads = buildSmoothQuadsCore(imageData, currentW, currentH, blurRadius, threshold, denoiseEnabled);
+        quads = buildSmoothQuadsCore(imageData, currentW, currentH, blurRadius, threshold, denoiseEnabled, ignoreTransparency);
         attempts++;
     }
 
@@ -1201,10 +1162,11 @@ function buildQuadsForLimit(imageData, params) {
     const blurRadius = params.blurRadius;
     const threshold = params.threshold;
     const denoiseEnabled = params.denoiseEnabled;
+    const ignoreTransparency = !!params.ignoreTransparency;
 
     let currentW = origW;
     let currentH = origH;
-    let rects = buildGridAndRectsQuads(imageData, currentW, currentH, denoiseEnabled, blurRadius, threshold);
+    let rects = buildGridAndRectsQuads(imageData, currentW, currentH, denoiseEnabled, blurRadius, threshold, ignoreTransparency);
     let isAutoOptimized = false;
 
     let attempts = 0;
@@ -1215,7 +1177,7 @@ function buildQuadsForLimit(imageData, params) {
         currentW = Math.max(32, Math.floor(currentW * factor));
         currentH = Math.max(32, Math.floor(currentH * factor));
 
-        rects = buildGridAndRectsQuads(imageData, currentW, currentH, denoiseEnabled, blurRadius, threshold);
+        rects = buildGridAndRectsQuads(imageData, currentW, currentH, denoiseEnabled, blurRadius, threshold, ignoreTransparency);
         attempts++;
     }
 

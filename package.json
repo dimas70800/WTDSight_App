@@ -1,6 +1,6 @@
 {
   "name": "wtdsight-app",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "WTDSight",
   "main": "electron/main.js",
   "author": "dimas7080",

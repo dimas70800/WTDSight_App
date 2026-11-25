@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">Политика конфиденциальности — WTDSight</title>
+    <link rel="icon" type="image/svg+xml" href="../images/logo.svg">
+    <style>
+        :root {
+            --bg-body: #202020;
+            --bg-panel: rgb(52, 52, 52);
+            --text-main: #ffffff;
+            --text-muted: #b5b5b5;
+            --input-bg: rgba(0, 0, 0, 0.2);
+            --border-col: rgba(255, 255, 255, 0.1);
+            --radius-panel: 18px;
+        }
+
+        [data-theme="light"] {
+            --bg-body: #ececec;
+            --bg-panel: rgb(245, 245, 245);
+            --text-main: #202020;
+            --text-muted: #555555;
+            --input-bg: rgba(0, 0, 0, 0.05);
+            --border-col: rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            color: var(--text-main);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-body);
+            min-height: 100vh;
+            padding: 30px 16px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            line-height: 1.6;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 740px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-col);
+            border-radius: var(--radius-panel);
+            padding: 32px 36px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-col);
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+            gap: 12px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .lang-btn,
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--input-bg);
+            border: 1px solid var(--border-col);
+            color: var(--text-main);
+            padding: 6px 10px;
+            border-radius: 6px;
+            outline: none;
+            font-family: inherit;
+            font-size: 13.33px;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .lang-btn {
+            gap: 6px;
+        }
+
+        .lang-btn:hover,
+        .back-link:hover {
+            background: rgba(128, 128, 128, 0.3);
+        }
+
+        .lang-btn img {
+            height: 20px;
+            border-radius: 3px;
+            background: white;
+            display: block;
+        }
+
+        h2 {
+            font-size: 17px;
+            font-weight: 600;
+            margin-top: 22px;
+            margin-bottom: 8px;
+        }
+
+        p {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+
+        p strong {
+            color: var(--text-main);
+        }
+
+        .back-container {
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-col);
+            display: flex;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 id="policyTitle">Политика конфиденциальности</h1>
+            <button type="button" class="lang-btn" onclick="toggleLanguage()">
+                <img src="../images/lang.png" alt="Lang">
+                <span id="langBtnText">RU</span>
+            </button>
+        </div>
+
+        <div id="contentBlock"></div>
+
+        <div class="back-container">
+            <a href="../" class="back-link" id="backLink" onclick="return returnToEditor(event)">Вернуться в редактор</a>
+        </div>
+    </div>
+
+    <script>
+        const content = {
+            ru: {
+                pageTitle: "Политика конфиденциальности — WTDSight",
+                policyTitle: "Политика конфиденциальности",
+                langBtnText: "RU",
+                backLink: "Вернуться в редактор",
+                html: `
+                    <h2>Сбор данных</h2>
+                    <p>WTDSight собирает только технические данные об устройстве для улучшения сайта. Все данные ваших прицелов и настроек хранятся только на вашем личном компьютере или мобильном устройстве, а при использовании синхронизации — в вашем личном Google Диске, и мной никак не управляются.</p>
+                    <p>WTDSight может использовать Google Drive для сохранения и синхронизации ваших прицелов на личном Google Диске. WTDSight может читать и записывать только файлы, созданные сайтом, и никакая информация не отправляется на другие внешние серверы.</p>
+                `
+            },
+            en: {
+                pageTitle: "Privacy Policy — WTDSight",
+                policyTitle: "Privacy Policy",
+                langBtnText: "EN",
+                backLink: "Back to editor",
+                html: `
+                    <h2>Collected Data</h2>
+                    <p>WTDSight collects only technical device data to improve the site. All your sight data and settings are stored only on your personal computer or mobile device, and, when using synchronization, in your personal Google Drive, and are not managed by me.</p>
+                    <p>WTDSight may use Google Drive to save and synchronize your sights on your personal Google Drive. WTDSight can only read and write files created by the site, and no information is sent to other external servers.</p>
+                `
+            }
+        };
+
+        let currentLang = 'ru';
+
+        function applyLanguage(lang) {
+            currentLang = lang;
+            const data = content[lang];
+            if (!data) return;
+
+            document.documentElement.lang = lang;
+            document.title = data.pageTitle;
+            document.getElementById('policyTitle').textContent = data.policyTitle;
+            document.getElementById('langBtnText').textContent = data.langBtnText;
+            document.getElementById('backLink').textContent = data.backLink;
+            document.getElementById('contentBlock').innerHTML = data.html;
+        }
+
+        function toggleLanguage() {
+            const next = currentLang === 'ru' ? 'en' : 'ru';
+            applyLanguage(next);
+            try {
+                localStorage.setItem('wtdsight-privacy-lang', next);
+            } catch (e) { }
+        }
+
+        function returnToEditor(e) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (window.opener && !window.opener.closed) {
+                try {
+                    window.opener.focus();
+                } catch (err) { }
+                window.close();
+                setTimeout(() => {
+                    if (!window.closed) {
+                        window.location.href = '../';
+                    }
+                }, 300);
+                return false;
+            }
+            if (document.referrer && document.referrer.includes(window.location.host)) {
+                window.location.href = document.referrer;
+            } else {
+                window.location.href = '../';
+            }
+            return false;
+        }
+
+        try {
+            history.pushState({ page: 'privacy' }, '', window.location.href);
+            window.addEventListener('popstate', () => {
+                returnToEditor();
+            });
+        } catch (e) { }
+
+        (function init() {
+            let savedLang = null;
+            try {
+                const urlLang = new URLSearchParams(window.location.search).get('lang');
+                if (urlLang === 'en' || urlLang === 'ru') savedLang = urlLang;
+            } catch (e) { }
+
+            if (!savedLang) {
+                try {
+                    if (window.opener && !window.opener.closed && typeof window.opener.lang !== 'undefined') {
+                        savedLang = (window.opener.lang === window.opener.en) ? 'en' : 'ru';
+                    }
+                } catch (e) { }
+            }
+
+            if (!savedLang) {
+                try {
+                    const settings = JSON.parse(localStorage.getItem('wtdsight-settings') || '{}');
+                    if (settings.language === 'en' || settings.language === 'ru') savedLang = settings.language;
+                } catch (e) { }
+            }
+
+            if (!savedLang) {
+                try {
+                    savedLang = localStorage.getItem('wtdsight-privacy-lang');
+                } catch (e) { }
+            }
+
+            applyLanguage(savedLang === 'en' ? 'en' : 'ru');
+
+            let theme = null;
+            try {
+                if (window.opener && !window.opener.closed) {
+                    theme = window.opener.document.body.getAttribute('data-theme') || 'dark';
+                }
+            } catch (e) { }
+
+            if (!theme) {
+                try {
+                    const settings = JSON.parse(localStorage.getItem('wtdsight-settings') || '{}');
+                    theme = settings.theme;
+                } catch (e) { }
+            }
+
+            if (theme === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+</body>
+
+</html>

@@ -1529,6 +1529,8 @@ function collectMagicWandWalls() {
     const quads = [];
 
     for (const [, obj] of objects) {
+        const layerId = obj.layer || 1;
+        if (typeof isLayerVisible === 'function' && !isLayerVisible(layerId)) continue;
         if (obj.type === "line") {
             lines.push({ start: obj.start, end: obj.end });
         } else if (obj.type === "quad") {

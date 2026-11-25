@@ -254,6 +254,22 @@ const ru =
     saveRefOnReloadLabel: "Сохранять референс при перезагрузке",
     oldSelectionLabel: "Старый режим выделения (по центру)",
 
+    gdriveSyncTitle: "Синхронизация с Google Диском",
+    gdriveLoginBtnText: "Войти в Google Диск",
+    gdriveSyncBtnText: "Синхронизировать",
+    gdriveLoadBtnText: "Загрузить из Google Диска",
+    gdriveLogoutBtnText: "Выйти из Google Диска",
+    gdriveLastSavePrefix: "Последнее сохранение: ",
+    gdriveLoginSuccess: "Успешный вход в Google Диск!",
+    gdriveLogoutSuccess: "Вы вышли из Google Диска",
+    gdriveSyncSuccess: "Синхронизировано с Google Диском!",
+    gdriveLoadSuccess: "Загружено из Google Диска!",
+    gdriveEmptyCanvasWarning: "Холст пуст — сохранение на Google Диске не перезаписано",
+    gdriveNoSaveFound: "Файл автосохранения не найден на Google Диске",
+    gdriveError: "Ошибка Google Диска",
+    gdriveNoInternet: "Нет подключения к интернету",
+    gdrivePrivacyLink: "Политика конфиденциальности",
+
     shapesTitleText: "Фигуры",
     shapesDescription: "Выберите фигуру и кликните по холсту для ее создания",
     shapesCreateBtn: "Создать",
@@ -335,6 +351,7 @@ const ru =
     vectorizeQuadsThreshLabel: "Порог чёрного",
     vectorizeQuadsDenoiseLabel: "Убрать одиночные пиксели",
     vectorizeQuadsSmoothLabel: "Сглаживание",
+    vectorizeQuadsIgnoreAlphaLabel: "Заливать прозрачный фон",
     autoOptimizedResolution: "(авто-оптимизация разрешения)",
     fillRestoreBtn: "Предыдущая зона",
 
@@ -621,6 +638,22 @@ const en =
     saveRefOnReloadLabel: "Save reference on reload",
     oldSelectionLabel: "Old selection mode (by center)",
 
+    gdriveSyncTitle: "Google Drive Synchronization",
+    gdriveLoginBtnText: "Sign in with Google Drive",
+    gdriveSyncBtnText: "Sync",
+    gdriveLoadBtnText: "Load from Google Drive",
+    gdriveLogoutBtnText: "Sign out of Google Drive",
+    gdriveLastSavePrefix: "Last saved: ",
+    gdriveLoginSuccess: "Signed in to Google Drive successfully!",
+    gdriveLogoutSuccess: "Signed out from Google Drive",
+    gdriveSyncSuccess: "Synced with Google Drive!",
+    gdriveLoadSuccess: "Loaded from Google Drive!",
+    gdriveEmptyCanvasWarning: "Canvas is empty — Drive backup was not overwritten",
+    gdriveNoSaveFound: "Autosave file not found on Google Drive",
+    gdriveError: "Google Drive error",
+    gdriveNoInternet: "No internet connection",
+    gdrivePrivacyLink: "Privacy Policy",
+
     shapesTitleText: "Shapes",
     shapesDescription: "Select a shape and click on the canvas to create it",
     shapesCreateBtn: "Create",
@@ -702,6 +735,7 @@ const en =
     vectorizeQuadsThreshLabel: "Threshold of black",
     vectorizeQuadsDenoiseLabel: "Remove single pixels",
     vectorizeQuadsSmoothLabel: "Smoothing",
+    vectorizeQuadsIgnoreAlphaLabel: "Fill transparent background",
     autoOptimizedResolution: "(auto-optimized resolution)",
     fillRestoreBtn: "Previous zone",
 
@@ -939,6 +973,14 @@ const langDependent =
         "saveRefOnReloadLabel",
         "oldSelectionLabel",
 
+        "gdriveSyncTitle",
+        "gdriveLoginBtnText",
+        "gdriveSyncBtnText",
+        "gdriveLoadBtnText",
+        "gdriveLogoutBtnText",
+        "gdriveLastSavePrefix",
+        "gdrivePrivacyLink",
+
         "shapesTitleText",
         "shapesDescription",
         "shapesCreateBtn",
@@ -1001,6 +1043,7 @@ const langDependent =
         "vectorizeQuadsThreshLabel",
         "vectorizeQuadsDenoiseLabel",
         "vectorizeQuadsSmoothLabel",
+        "vectorizeQuadsIgnoreAlphaLabel",
         "fillRestoreBtn",
 
         "ctxDelete",
@@ -1067,6 +1110,9 @@ function changeLang(to) {
     }
     if (typeof updateRefEnhanceButtonState === 'function') {
         updateRefEnhanceButtonState();
+    }
+    if (typeof updateGDriveUI === 'function') {
+        updateGDriveUI();
     }
 }
 

@@ -20,7 +20,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     autosaveWriteToDisk: (data) => ipcRenderer.invoke('autosave:write-to-disk', data),
     autosaveReadFromDisk: () => ipcRenderer.invoke('autosave:read-from-disk'),
-    readAppFile: (relPath) => ipcRenderer.invoke('read-app-file', relPath)
+    readAppFile: (relPath) => ipcRenderer.invoke('read-app-file', relPath),
+    gdriveAuth: () => ipcRenderer.invoke('gdrive:auth'),
+    gdriveGetToken: () => ipcRenderer.invoke('gdrive:get-token'),
+    gdriveLogout: () => ipcRenderer.invoke('gdrive:logout')
 });
 
 window.addEventListener('DOMContentLoaded', () => {

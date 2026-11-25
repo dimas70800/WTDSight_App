@@ -619,6 +619,16 @@
                                         style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 5px;">
                                         <label
                                             style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+                                            <input type="checkbox" id="vectorizeQuadsIgnoreAlphaCheckbox"
+                                                style="transform: scale(1.1);">
+                                            <span id="vectorizeQuadsIgnoreAlphaLabel">Заливать прозрачный фон</span>
+                                        </label>
+                                    </div>
+
+                                    <div
+                                        style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0;">
+                                        <label
+                                            style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
                                             <input type="checkbox" id="vectorizeQuadsDenoiseCheckbox"
                                                 style="transform: scale(1.1);">
                                             <span id="vectorizeQuadsDenoiseLabel">Убрать одиночные пиксели</span>
@@ -1157,6 +1167,32 @@
                                 путь</button>
                         </div>
                     </div>
+                    <div class="settings-row" id="gdriveSettingsRow" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 10px; flex-wrap: wrap;">
+                            <span id="gdriveSyncTitle">Синхронизация с Google Диском</span>
+                            <div id="gdriveLoggedOutUI" style="display: flex; align-items: center; gap: 8px;">
+                                <button id="gdriveLoginBtn" type="button" style="display: flex; align-items: center; gap: 8px; padding: 8px 15px; min-height: 38px; font-size: 13.5px; cursor: pointer;">
+                                    <img src="images/gdrive.svg" alt="Google Drive" style="width: 20px; height: 20px;">
+                                    <span id="gdriveLoginBtnText">Войти в Google Диск</span>
+                                </button>
+                            </div>
+                            <div id="gdriveLoggedInUI" style="display: none; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <button id="gdriveSyncBtn" type="button" style="display: flex; align-items: center; gap: 5px; padding: 7px 12px; min-height: 36px; font-size: 13px; cursor: pointer;">
+                                    <span id="gdriveSyncBtnText">Синхронизировать</span>
+                                </button>
+                                <button id="gdriveLoadBtn" type="button" style="display: flex; align-items: center; gap: 5px; padding: 7px 12px; min-height: 36px; font-size: 13px; cursor: pointer;">
+                                    <span id="gdriveLoadBtnText">Загрузить из Google Диска</span>
+                                </button>
+                                <button id="gdriveLogoutBtn" type="button" style="padding: 7px 14px; min-height: 36px; font-size: 13px; background: #eb3b3b; color: #ffffff; border: none; cursor: pointer;">
+                                    <span id="gdriveLogoutBtnText" style="color: #ffffff;">Выйти из Google Диска</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="gdriveStatusRow" style="display: none; justify-content: space-between; align-items: center; font-size: 13.5px; opacity: 0.9; border-top: 1px solid var(--border-col); padding-top: 8px; margin-top: 2px;">
+                            <span><span id="gdriveLastSavePrefix">Последнее сохранение: </span><span id="gdriveLastSaveTime">—</span></span>
+                            <span id="gdriveAccountInfo" style="font-size: 12.5px; opacity: 0.95;"></span>
+                        </div>
+                    </div>
                     <div class="settings-row">
                         <span id="changeLangTitle">Сменить язык:</span>
                         <img src="images/lang.png" alt="Lang"
@@ -1201,6 +1237,9 @@
                     <div class="settings-row">
                         <span id="oldSelectionLabel">Старый режим выделения</span>
                         <input type="checkbox" id="oldSelectionCheckBox" style="transform: scale(1.5);">
+                    </div>
+                    <div style="display: flex; justify-content: center; margin-top: 15px; margin-bottom: 5px;">
+                        <a href="privacy/index.html" target="_blank" rel="opener" id="gdrivePrivacyLink" style="font-size: 11px; opacity: 0.5; color: var(--text-white); text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='0.5'">Политика конфиденциальности</a>
                     </div>
                 </div>
 
@@ -1500,6 +1539,7 @@
     <script src="scripts/curve.js"></script>
     <script src="scripts/canvas.js"></script>
     <script src="scripts/autosave.js"></script>
+    <script src="scripts/gdrive.js"></script>
     <script src="scripts/updater.js"></script>
     <script src="scripts/exportblkmenu.js"></script>
     <script src="scripts/hatch.js"></script>

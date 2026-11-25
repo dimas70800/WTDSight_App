@@ -27,6 +27,7 @@ function forcedSave()
     const data = formSaveData();
     localStorage.setItem("wtdmsight-save", data);
     saveToDisk(data);
+    if (typeof syncGDriveAutosave === 'function') syncGDriveAutosave(data);
 
     //alert(lang === ru ? "Принудительно сохранено!" : "Force-saved!");
     saveNotify();
@@ -65,6 +66,7 @@ function autosaveRoutine()
         const data = formSaveData();
         localStorage.setItem("wtdmsight-save", data);
         saveToDisk(data);
+        if (typeof syncGDriveAutosave === 'function') syncGDriveAutosave(data);
         saveNotify();
         //console.log("Autosaved");
     }

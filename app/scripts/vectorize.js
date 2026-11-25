@@ -377,6 +377,8 @@
             const denoiseEnabled = document.getElementById('vectorizeQuadsDenoiseCheckbox').checked;
             const smoothModeEl = document.getElementById('vectorizeQuadsSmoothCheckbox');
             const smoothMode = smoothModeEl ? smoothModeEl.checked : false;
+            const ignoreAlphaEl = document.getElementById('vectorizeQuadsIgnoreAlphaCheckbox');
+            const ignoreTransparency = ignoreAlphaEl ? ignoreAlphaEl.checked : false;
 
             const worker = new Worker('scripts/vectorize-worker.js');
 
@@ -439,7 +441,8 @@
                     blurRadius: blurRadius,
                     threshold: threshold,
                     denoiseEnabled: denoiseEnabled,
-                    smoothMode: smoothMode
+                    smoothMode: smoothMode,
+                    ignoreTransparency: ignoreTransparency
                 }
             });
         }
@@ -602,6 +605,8 @@
             if (!loadImageFromReference()) return;
 
             const target = parseInt(document.getElementById('vectorizeQuadsTarget').value);
+            const ignoreAlphaEl = document.getElementById('vectorizeQuadsIgnoreAlphaCheckbox');
+            const ignoreTransparency = ignoreAlphaEl ? ignoreAlphaEl.checked : false;
             const statusDiv = document.getElementById('vectorizeStatus');
 
             if (statusDiv) statusDiv.innerHTML = (lang.vectorizeAutoProgress || 'Автоподбор') + ": 0%...";
@@ -698,7 +703,8 @@
                     height: currentSourceImageData.height
                 },
                 tests: tests,
-                target: target
+                target: target,
+                ignoreTransparency: ignoreTransparency
             });
         }
 
@@ -713,6 +719,8 @@
                 document.getElementById('vectorizeQuadsDenoiseCheckbox').checked = false;
                 const smoothCb = document.getElementById('vectorizeQuadsSmoothCheckbox');
                 if (smoothCb) smoothCb.checked = false;
+                const ignoreAlphaCb = document.getElementById('vectorizeQuadsIgnoreAlphaCheckbox');
+                if (ignoreAlphaCb) ignoreAlphaCb.checked = false;
             } else {
                 const targetSlider = document.getElementById('vectorizeTargetLines');
                 targetSlider.value = "2000";
@@ -861,6 +869,7 @@
             const quadsThreshVal = document.getElementById('vectorizeQuadsThreshVal');
             const quadsDenoise = document.getElementById('vectorizeQuadsDenoiseCheckbox');
             const quadsSmooth = document.getElementById('vectorizeQuadsSmoothCheckbox');
+            const quadsIgnoreAlpha = document.getElementById('vectorizeQuadsIgnoreAlphaCheckbox');
 
             if (quadsMaxSpan) quadsMaxSpan.innerText = quadsTarget.max;
 
@@ -885,6 +894,12 @@
 
             if (quadsSmooth) {
                 quadsSmooth.addEventListener('change', () => {
+                    if (tool === 'vectorize') scheduleVectorizeUpdate();
+                });
+            }
+
+            if (quadsIgnoreAlpha) {
+                quadsIgnoreAlpha.addEventListener('change', () => {
                     if (tool === 'vectorize') scheduleVectorizeUpdate();
                 });
             }
